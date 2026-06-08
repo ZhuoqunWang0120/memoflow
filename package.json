@@ -1,0 +1,22 @@
+{
+  "name": "memoflow-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "npm run build --silent && node dist/webServer.js",
+    "suggest": "npm run build --silent && node dist/cli.js",
+    "items": "npm run build --silent && node dist/itemsCli.js",
+    "eval": "npm run build --silent && node dist/eval/runEval.js",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.3"
+  }
+}
