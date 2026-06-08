@@ -14,6 +14,45 @@ raw memo
 
 No database, auth, cloud sync, RAG, reminders, or import integrations yet.
 
+## Product Flow
+
+```mermaid
+flowchart TD
+  A[Raw memo dump] --> B[Generate suggestions]
+  B --> C[Editable suggestion cards]
+  C --> D{User decision}
+  D -->|Approve| E[Save as Item]
+  D -->|Edit + approve| E
+  D -->|Reject| F[Discard suggestion]
+  E --> G[data/items.jsonl]
+  G --> H[Saved item list]
+  H --> I[Update status]
+  H --> J[Archive]
+  H --> K[Export CSV]
+```
+
+## Architecture Flow
+
+```mermaid
+flowchart LR
+  UI[Local webapp / CLI] --> API[Local API or CLI command]
+  API --> SuggestionService[suggestionService]
+  SuggestionService --> Parser{Parser}
+  Parser -->|stub| Stub[stubSuggestionParser]
+  Parser -->|llm| LLM[OpenAI parser]
+  Stub --> SuggestionResult[SuggestionResult]
+  LLM --> SuggestionResult
+  SuggestionResult --> Approval[suggestionApprovalService]
+  Approval --> ItemInput[AddItemInput]
+  ItemInput --> Store[itemStoreService]
+  Store --> Jsonl[(data/items.jsonl)]
+  Store --> Csv[CSV export]
+
+  Schemas[Zod schemas] -. validate .-> SuggestionResult
+  Schemas -. validate .-> ItemInput
+  Schemas -. validate .-> Store
+```
+
 ## Setup
 
 ```bash
