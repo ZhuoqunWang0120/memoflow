@@ -5,3 +5,4 @@ dist/
 !.env.example
 *.log
 data/items.local.backup.jsonl
+dev_notes/notes_parkinglot.md
