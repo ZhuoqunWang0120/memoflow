@@ -21,6 +21,7 @@ import {
   updateMemory,
 } from "./services/memoryStoreService.js";
 import { buildSuggestionContext } from "./services/suggestionContextService.js";
+import { CAPTURE_HTML } from "./webServerCaptureHtml.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -64,6 +65,11 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/") {
       sendHtml(res, APP_HTML);
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/capture") {
+      sendHtml(res, CAPTURE_HTML);
       return;
     }
 

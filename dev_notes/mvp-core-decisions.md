@@ -1298,3 +1298,80 @@ Learning:
   fixes: item detail fetches were being swallowed by the broader item list route,
   so the existing-item editor opened with blank fields until route ordering was
   corrected.
+
+## Compact Capture Companion Route
+
+Implemented on 2026-06-10.
+
+### Decision: add /capture route
+
+Route: `/capture`
+
+Purpose: capture now, organize later.
+
+Scope: two lowest-friction actions only:
+
+1. Drop a raw memo and save it for later review (calls existing `POST /api/dumps`).
+2. Add one freeform memory (calls existing `POST /api/memory`).
+
+### What /capture intentionally does not do
+
+- No LLM calls.
+- No suggestion generation.
+- No direct item creation.
+- No pending review list.
+- No item ledger.
+- No memory list/management UI.
+- No dedup or context-aware review.
+- No full UI redesign.
+
+### Product rationale
+
+MemoFlow needs a low-friction capture surface. The full workspace at `/` remains
+responsible for review, editing, item ledger, context-aware generation, and
+organization. The `/capture` route supports both desktop side-panel usage and a
+future mobile/PWA direction without committing to full mobile app complexity yet.
+
+### UI strategy
+
+- Current implementation stays basic and functional.
+- Google Stitch is not integrated yet.
+- Later, Google Stitch can be used only as a visual/layout reference, first for
+  `/capture`, then eventually for the full workspace after core flows stabilize.
+- Existing business logic and storage remain the source of truth.
+
+### Implementation
+
+Added:
+
+- `src/webServerCaptureHtml.ts` — standalone module exporting `CAPTURE_HTML`
+- `GET /capture` route in `src/webServer.ts` serving the capture page
+- `src/eval/runCaptureEval.ts` — eval runner covering route, service, and API
+  behaviors
+- `npm run eval:capture` script
+
+Capture page structure:
+
+- Header: "MemoFlow Capture" with subtitle "Drop it now. Review later."
+- Quick Memo section: textarea + Save for later button
+- Add Memory section: textarea + Add memory button
+- Workspace navigation link back to `/`
+
+Behavior:
+
+- Trim whitespace, reject empty input.
+- Save raw memo via existing `addDump()` — no suggestion generation, no item
+  creation.
+- Save memory via existing `addMemory()` — no LLM, no classification.
+- Clear input and show lightweight confirmation on success.
+- Show error message on failure.
+
+Verification:
+
+```text
+npm run eval:capture    # 13/13 passed
+npm run eval            # 17/17 passed
+npm run eval:items      # 17/17 passed
+npm run eval:memory     # 11/11 passed
+npm run eval:context    # 15/15 passed
+```
