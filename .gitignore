@@ -5,4 +5,9 @@ dist/
 !.env.example
 *.log
 data/items.local.backup.jsonl
+data/dumps.jsonl
+data/items.jsonl
 dev_notes/notes_parkinglot.md
+dev_notes/exisitng_item_edit_prompt.md
+dev_notes/realtime_dedup_prompt-0.md
+dev_notes/realtime_dedup_prompt-1.md
