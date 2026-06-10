@@ -9,6 +9,16 @@ import { add, archive, list, update } from "./services/itemStoreService.js";
 import { suggestionToAddItemInput } from "./services/suggestionApprovalService.js";
 import { ItemFieldsSchema, ItemTypeSchema } from "./schemas/item.js";
 import { SuggestionSchema } from "./schemas/suggestion.js";
+import { addDump, ignoreDump, listPending, markReviewed } from "./services/dumpStoreService.js";
+import { ItemSortOptionValues, type ArchivedVisibility, type ItemSortOption } from "./services/itemLedgerQuery.js";
+import {
+  addMemory,
+  archiveMemory,
+  deleteMemory,
+  getActiveMemory,
+  listMemory,
+  updateMemory,
+} from "./services/memoryStoreService.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -18,6 +28,7 @@ const CV_PATH = join(process.cwd(), "public", "carol-wang-cv-062026-webapp.pdf")
 const GenerateSuggestionsRequestSchema = z.object({
   rawText: z.string().trim().min(1, "rawText is required"),
   parser: z.enum(["stub", "llm"]).optional().default("stub"),
+  useMemory: z.boolean().optional().default(false),
 });
 
 const ApprovalOverridesSchema = z.object({
@@ -32,6 +43,18 @@ const AddApprovedItemRequestSchema = z.object({
   rawText: z.string(),
   suggestion: SuggestionSchema,
   overrides: ApprovalOverridesSchema.optional(),
+});
+
+const AddDumpRequestSchema = z.object({
+  rawText: z.string().trim().min(1, "rawText is required"),
+});
+
+const AddMemoryRequestSchema = z.object({
+  text: z.string().trim().min(1, "Memory text is required"),
+});
+
+const UpdateMemoryRequestSchema = z.object({
+  text: z.string().trim().min(1, "Memory text is required"),
 });
 
 const UpdateItemRequestSchema = z.object({
@@ -57,14 +80,91 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/api/suggestions") {
       const body = GenerateSuggestionsRequestSchema.parse(await readJson(req));
-      const result = await createSuggestionsFromDump({ rawText: body.rawText }, { parser: body.parser });
+      const memory = body.useMemory ? await getActiveMemory({ limit: 20 }) : [];
+      const result = await createSuggestionsFromDump(
+        {
+          rawText: body.rawText,
+          context: body.useMemory ? { snippets: memory.map((entry) => entry.text) } : undefined,
+        },
+        { parser: body.parser },
+      );
       sendJson(res, 200, result);
       return;
     }
 
-    if (req.method === "GET" && req.url === "/api/items") {
-      const items = await list();
+    if (req.method === "GET" && req.url?.startsWith("/api/memory")) {
+      const params = new URL(req.url, `http://${HOST}:${PORT}`).searchParams;
+      const memory = await listMemory({ includeArchived: params.get("archived") === "show" });
+      sendJson(res, 200, { memory });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/api/memory") {
+      const body = AddMemoryRequestSchema.parse(await readJson(req));
+      const memory = await addMemory(body.text);
+      sendJson(res, 201, memory);
+      return;
+    }
+
+    const memoryArchiveMatch = req.url?.match(/^\/api\/memory\/([^/]+)\/archive$/);
+    if (req.method === "POST" && memoryArchiveMatch?.[1]) {
+      const memory = await archiveMemory(decodeURIComponent(memoryArchiveMatch[1]));
+      sendJson(res, 200, memory);
+      return;
+    }
+
+    const memoryMatch = req.url?.match(/^\/api\/memory\/([^/]+)$/);
+    if (req.method === "PATCH" && memoryMatch?.[1]) {
+      const body = UpdateMemoryRequestSchema.parse(await readJson(req));
+      const memory = await updateMemory(decodeURIComponent(memoryMatch[1]), body);
+      sendJson(res, 200, memory);
+      return;
+    }
+
+    if (req.method === "DELETE" && memoryMatch?.[1]) {
+      await deleteMemory(decodeURIComponent(memoryMatch[1]));
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/api/items")) {
+      const params = new URL(req.url, `http://${HOST}:${PORT}`).searchParams;
+      const type = params.get("type");
+      const items = await list({
+        archived: parseArchivedVisibility(params.get("archived")),
+        sort: parseItemSort(params.get("sort")),
+        type: type ? ItemTypeSchema.parse(type) : undefined,
+        status: params.get("status") || undefined,
+        query: params.get("query") || undefined,
+      });
       sendJson(res, 200, { items });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/api/dumps") {
+      const dumps = await listPending();
+      sendJson(res, 200, { dumps });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/api/dumps") {
+      const body = AddDumpRequestSchema.parse(await readJson(req));
+      const dump = await addDump({ rawText: body.rawText, source: "web" });
+      sendJson(res, 201, dump);
+      return;
+    }
+
+    const dumpIgnoreMatch = req.url?.match(/^\/api\/dumps\/([^/]+)\/ignore$/);
+    if (req.method === "POST" && dumpIgnoreMatch?.[1]) {
+      const dump = await ignoreDump(decodeURIComponent(dumpIgnoreMatch[1]));
+      sendJson(res, 200, dump);
+      return;
+    }
+
+    const dumpReviewedMatch = req.url?.match(/^\/api\/dumps\/([^/]+)\/reviewed$/);
+    if (req.method === "POST" && dumpReviewedMatch?.[1]) {
+      const dump = await markReviewed(decodeURIComponent(dumpReviewedMatch[1]));
+      sendJson(res, 200, dump);
       return;
     }
 
@@ -142,6 +242,17 @@ function sendPdf(res: ServerResponse, pdf: Buffer, headOnly = false): void {
     "Cache-Control": "no-store",
   });
   res.end(headOnly ? undefined : pdf);
+}
+
+function parseArchivedVisibility(value: string | null): ArchivedVisibility {
+  if (value === "show" || value === "only" || value === "hide") return value;
+  return "hide";
+}
+
+function parseItemSort(value: string | null): ItemSortOption | undefined {
+  if (!value) return undefined;
+  if (ItemSortOptionValues.includes(value as ItemSortOption)) return value as ItemSortOption;
+  throw new Error(`Invalid item sort: ${value}`);
 }
 
 const APP_HTML = `<!doctype html>
@@ -304,6 +415,33 @@ const APP_HTML = `<!doctype html>
     .parser {
       width: 120px;
     }
+    .generation-settings {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .generation-settings.disabled {
+      opacity: 0.55;
+    }
+    .checkbox-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .checkbox-row input {
+      width: auto;
+      margin: 0;
+    }
+    .memory-input {
+      min-height: 74px;
+    }
+    .memory-edit {
+      min-height: 82px;
+    }
     .stack {
       display: grid;
       gap: 12px;
@@ -415,19 +553,49 @@ const APP_HTML = `<!doctype html>
         <h2>Raw Memo</h2>
         <textarea id="rawText"></textarea>
         <div class="controls">
-          <select id="parser" class="parser" aria-label="Parser">
-            <option value="stub">stub</option>
-            <option value="llm">llm</option>
-          </select>
-          <button id="generateBtn">Generate Suggestions</button>
+          <button id="saveLaterBtn" class="secondary">Save for later</button>
+          <div id="generationSettings" class="generation-settings">
+            <select id="parser" class="parser" aria-label="Parser">
+              <option value="stub">stub</option>
+              <option value="llm">llm</option>
+            </select>
+            <label class="checkbox-row">
+              <input id="useMemory" type="checkbox" />
+              Use memory
+            </label>
+            <button id="generateBtn">Generate suggestions now</button>
+          </div>
           <span id="status" class="muted"></span>
         </div>
       </section>
     </div>
 
+    <section class="band">
+      <h2>Memory</h2>
+      <div class="card">
+        <label>Add memory
+          <textarea id="memoryText" class="memory-input" placeholder="Kiersten is my Duke DSO contact for STEM OPT questions."></textarea>
+        </label>
+        <div class="controls">
+          <button id="addMemoryBtn" class="secondary">+ Add Memory</button>
+          <label class="checkbox-row">
+            <input id="showArchivedMemory" type="checkbox" />
+            Show archived
+          </label>
+        </div>
+      </div>
+      <div id="memoryList" class="stack"></div>
+    </section>
+
+    <section class="band">
+      <h2>Pending Review</h2>
+      <div id="pendingDumps" class="stack"></div>
+    </section>
+
     <div class="workspace">
       <section>
         <h2>Suggestions</h2>
+        <div id="reviewControls"></div>
         <div id="suggestions" class="stack">
           <div class="empty">Generate suggestions from a memo dump, then approve, edit, or reject each card.</div>
         </div>
@@ -435,6 +603,56 @@ const APP_HTML = `<!doctype html>
 
       <section>
         <h2>Saved Items</h2>
+        <div class="card">
+          <div class="grid">
+            <label>Search
+              <input id="itemSearch" placeholder="Title, description, source memo" />
+            </label>
+            <label>Sort
+              <select id="itemSort">
+                <option value="updated_at_desc">Updated newest first</option>
+                <option value="updated_at_asc">Updated oldest first</option>
+                <option value="created_at_desc">Created newest first</option>
+                <option value="created_at_asc">Created oldest first</option>
+                <option value="due_date_asc">Due date soonest first</option>
+                <option value="follow_up_date_asc">Follow-up date soonest first</option>
+                <option value="type_asc">Type</option>
+                <option value="status_asc">Status</option>
+              </select>
+            </label>
+            <label>Type
+              <select id="itemTypeFilter">
+                <option value="">All types</option>
+                <option value="task">task</option>
+                <option value="exploration">exploration</option>
+                <option value="idea">idea</option>
+                <option value="reference">reference</option>
+              </select>
+            </label>
+            <label>Status
+              <select id="itemStatusFilter">
+                <option value="">All statuses</option>
+                <option value="ready">ready</option>
+                <option value="open">open</option>
+                <option value="saved">saved</option>
+                <option value="waiting">waiting</option>
+                <option value="in_progress">in_progress</option>
+                <option value="done">done</option>
+                <option value="archived">archived</option>
+              </select>
+            </label>
+            <label>Archived
+              <select id="itemArchivedFilter">
+                <option value="hide">Hide archived</option>
+                <option value="show">Show archived</option>
+                <option value="only">Archived only</option>
+              </select>
+            </label>
+          </div>
+          <div class="controls">
+            <button id="clearItemFiltersBtn" class="secondary">Clear filters</button>
+          </div>
+        </div>
         <div id="items" class="stack"></div>
       </section>
     </div>
@@ -443,41 +661,101 @@ const APP_HTML = `<!doctype html>
   <script>
     const state = {
       rawText: "",
+      reviewingDumpId: null,
+      reviewingDump: null,
+      reviewSetupDumpId: null,
       suggestions: [],
       rejected: new Set(),
       approved: new Set(),
       items: [],
+      pendingDumps: [],
+      memory: [],
     };
 
     const $ = (id) => document.getElementById(id);
     const errorEl = $("error");
     const statusEl = $("status");
+    const reviewControlsEl = $("reviewControls");
     const suggestionsEl = $("suggestions");
     const itemsEl = $("items");
+    const pendingDumpsEl = $("pendingDumps");
+    const memoryListEl = $("memoryList");
 
-    $("generateBtn").addEventListener("click", generateSuggestions);
+    $("generateBtn").addEventListener("click", () => {
+      state.reviewingDumpId = null;
+      state.reviewingDump = null;
+      state.reviewSetupDumpId = null;
+      renderReviewControls();
+      renderPendingDumps();
+      generateSuggestions();
+    });
+    $("saveLaterBtn").addEventListener("click", saveDumpForLater);
+    $("addMemoryBtn").addEventListener("click", addMemoryEntry);
+    $("showArchivedMemory").addEventListener("change", loadMemory);
+    $("itemSearch").addEventListener("input", debounce(loadItems, 150));
+    $("itemSort").addEventListener("change", loadItems);
+    $("itemTypeFilter").addEventListener("change", loadItems);
+    $("itemStatusFilter").addEventListener("change", loadItems);
+    $("itemArchivedFilter").addEventListener("change", loadItems);
+    $("clearItemFiltersBtn").addEventListener("click", clearItemFilters);
 
     loadItems();
+    loadPendingDumps();
+    loadMemory();
 
-    async function generateSuggestions() {
+    async function saveDumpForLater() {
       clearError();
       const rawText = $("rawText").value.trim();
-      const parser = $("parser").value;
+      if (!rawText) {
+        showError("Enter a memo dump first.");
+        return;
+      }
+
+      setBusy("Saving dump...", { disableGenerationSettings: true });
+      try {
+        await requestJson("/api/dumps", {
+          method: "POST",
+          body: { rawText },
+        });
+        $("rawText").value = "";
+        state.rawText = "";
+        state.reviewingDumpId = null;
+        state.reviewingDump = null;
+        state.reviewSetupDumpId = null;
+        state.suggestions = [];
+        state.rejected = new Set();
+        state.approved = new Set();
+        renderReviewControls();
+        renderSuggestions();
+        await loadPendingDumps();
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    async function generateSuggestions(settings = {}) {
+      clearError();
+      const rawText = (settings.rawText ?? $("rawText").value).trim();
+      const parser = settings.parser ?? $("parser").value;
+      const useMemory = settings.useMemory ?? $("useMemory").checked;
       if (!rawText) {
         showError("Enter a memo dump first.");
         return;
       }
 
       state.rawText = rawText;
-      setBusy("Generating suggestions...");
+      setBusy("Generating suggestions...", { disableGenerationSettings: true });
       try {
         const result = await requestJson("/api/suggestions", {
           method: "POST",
-          body: { rawText, parser },
+          body: { rawText, parser, useMemory },
         });
         state.suggestions = result.suggestions || [];
         state.rejected = new Set();
         state.approved = new Set();
+        renderReviewControls();
         renderSuggestions();
       } catch (error) {
         showError(error.message);
@@ -486,14 +764,339 @@ const APP_HTML = `<!doctype html>
       }
     }
 
+    async function loadPendingDumps() {
+      clearError();
+      try {
+        const result = await requestJson("/api/dumps");
+        state.pendingDumps = (result.dumps || []).filter((dump) => dump.id !== state.reviewingDumpId);
+        renderPendingDumps();
+      } catch (error) {
+        showError(error.message);
+      }
+    }
+
     async function loadItems() {
       clearError();
       try {
-        const result = await requestJson("/api/items");
+        const result = await requestJson("/api/items" + itemQueryString());
         state.items = result.items || [];
         renderItems();
       } catch (error) {
         showError(error.message);
+      }
+    }
+
+    async function loadMemory() {
+      clearError();
+      try {
+        const archived = $("showArchivedMemory").checked ? "?archived=show" : "";
+        const result = await requestJson("/api/memory" + archived);
+        state.memory = result.memory || [];
+        renderMemory();
+      } catch (error) {
+        showError(error.message);
+      }
+    }
+
+    async function addMemoryEntry() {
+      clearError();
+      const text = $("memoryText").value.trim();
+      if (!text) {
+        showError("Enter memory text first.");
+        return;
+      }
+
+      setBusy("Saving memory...");
+      try {
+        await requestJson("/api/memory", {
+          method: "POST",
+          body: { text },
+        });
+        $("memoryText").value = "";
+        await loadMemory();
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    function renderMemory() {
+      if (state.memory.length === 0) {
+        memoryListEl.innerHTML = '<div class="empty">No memory entries yet.</div>';
+        return;
+      }
+
+      memoryListEl.innerHTML = "";
+      state.memory.forEach((entry) => {
+        const card = document.createElement("div");
+        card.className = "card" + (entry.archived_at ? " archived" : "");
+        card.innerHTML = \`
+          <div class="row-head">
+            <div>
+              <div class="muted">\${escapeHtml(entry.id)} · updated \${escapeHtml(entry.updated_at)}</div>
+            </div>
+            \${entry.archived_at ? '<span class="pill">archived</span>' : '<span class="pill">active</span>'}
+          </div>
+          <label>Memory text
+            <textarea class="memory-edit" data-memory-text>\${escapeHtml(entry.text)}</textarea>
+          </label>
+          <div class="actions">
+            <button class="secondary" data-action="save">Save Edit</button>
+            <button class="secondary" data-action="archive" \${entry.archived_at ? "disabled" : ""}>Archive</button>
+            <button class="danger" data-action="delete">Delete</button>
+          </div>
+        \`;
+        card.querySelector('[data-action="save"]').addEventListener("click", () => updateMemoryEntry(entry.id, card));
+        card.querySelector('[data-action="archive"]').addEventListener("click", () => archiveMemoryEntry(entry.id));
+        card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteMemoryEntry(entry.id));
+        memoryListEl.appendChild(card);
+      });
+    }
+
+    async function updateMemoryEntry(id, card) {
+      clearError();
+      const text = card.querySelector("[data-memory-text]").value.trim();
+      if (!text) {
+        showError("Memory text cannot be empty.");
+        return;
+      }
+
+      setBusy("Updating memory...");
+      try {
+        await requestJson("/api/memory/" + encodeURIComponent(id), {
+          method: "PATCH",
+          body: { text },
+        });
+        await loadMemory();
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    async function archiveMemoryEntry(id) {
+      clearError();
+      setBusy("Archiving memory...");
+      try {
+        await requestJson("/api/memory/" + encodeURIComponent(id) + "/archive", {
+          method: "POST",
+          body: {},
+        });
+        await loadMemory();
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    async function deleteMemoryEntry(id) {
+      clearError();
+      setBusy("Deleting memory...");
+      try {
+        await requestJson("/api/memory/" + encodeURIComponent(id), {
+          method: "DELETE",
+        });
+        await loadMemory();
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    function itemQueryString() {
+      const params = new URLSearchParams();
+      const query = $("itemSearch").value.trim();
+      const sort = $("itemSort").value;
+      const type = $("itemTypeFilter").value;
+      const status = $("itemStatusFilter").value;
+      const archived = $("itemArchivedFilter").value;
+
+      if (query) params.set("query", query);
+      if (sort) params.set("sort", sort);
+      if (type) params.set("type", type);
+      if (status) params.set("status", status);
+      if (archived) params.set("archived", archived);
+
+      const text = params.toString();
+      return text ? "?" + text : "";
+    }
+
+    function clearItemFilters() {
+      $("itemSearch").value = "";
+      $("itemSort").value = "updated_at_desc";
+      $("itemTypeFilter").value = "";
+      $("itemStatusFilter").value = "";
+      $("itemArchivedFilter").value = "hide";
+      loadItems();
+    }
+
+    function renderPendingDumps() {
+      if (state.pendingDumps.length === 0) {
+        pendingDumpsEl.innerHTML = '<div class="empty">No pending dumps.</div>';
+        return;
+      }
+
+      pendingDumpsEl.innerHTML = "";
+      state.pendingDumps.forEach((dump) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        const expanded = state.reviewSetupDumpId === dump.id;
+        const reviewSetupHtml = expanded
+          ? '<div class="card">' +
+              '<div class="row-title">Review with</div>' +
+              '<div class="controls">' +
+                '<select data-review-parser class="parser" aria-label="Review parser">' +
+                  '<option value="stub">stub</option>' +
+                  '<option value="llm">llm</option>' +
+                '</select>' +
+                '<label class="checkbox-row">' +
+                  '<input data-review-memory type="checkbox" />' +
+                  'Use memory' +
+                '</label>' +
+                '<button data-action="generate-review">Generate review</button>' +
+                '<button class="secondary" data-action="cancel-review-setup">Cancel</button>' +
+              '</div>' +
+            '</div>'
+          : "";
+        card.innerHTML = \`
+          <div class="row-head">
+            <div>
+              <div class="row-title">\${escapeHtml(dump.raw_text)}</div>
+              <div class="muted">\${escapeHtml(dump.id)} · saved \${escapeHtml(dump.created_at)}</div>
+            </div>
+            <span class="pill">\${escapeHtml(dump.status)}</span>
+          </div>
+          <div class="actions">
+            <button data-action="review">Review now</button>
+            <button class="danger" data-action="ignore">Ignore</button>
+          </div>
+          \${reviewSetupHtml}
+        \`;
+        card.querySelector('[data-action="review"]').addEventListener("click", () => showPendingReviewSetup(dump.id));
+        card.querySelector('[data-action="ignore"]').addEventListener("click", () => ignorePendingDump(dump.id));
+        card.querySelector('[data-action="generate-review"]')?.addEventListener("click", () => {
+          const parser = card.querySelector("[data-review-parser]").value;
+          const useMemory = card.querySelector("[data-review-memory]").checked;
+          startPendingDumpReview(dump, { parser, useMemory });
+        });
+        card.querySelector('[data-action="cancel-review-setup"]')?.addEventListener("click", () => {
+          state.reviewSetupDumpId = null;
+          renderPendingDumps();
+        });
+        pendingDumpsEl.appendChild(card);
+      });
+    }
+
+    function showPendingReviewSetup(id) {
+      state.reviewSetupDumpId = state.reviewSetupDumpId === id ? null : id;
+      renderPendingDumps();
+    }
+
+    async function startPendingDumpReview(dump, settings) {
+      $("rawText").value = dump.raw_text;
+      state.reviewingDumpId = dump.id;
+      state.reviewingDump = dump;
+      state.reviewSetupDumpId = null;
+      removePendingDumpFromView(dump.id);
+      renderReviewControls();
+      await generateSuggestions({ rawText: dump.raw_text, parser: settings.parser, useMemory: settings.useMemory });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function renderReviewControls() {
+      if (!state.reviewingDump) {
+        reviewControlsEl.innerHTML = "";
+        return;
+      }
+
+      reviewControlsEl.innerHTML = \`
+        <div class="card">
+          <div class="row-head">
+            <div>
+              <div class="row-title">Reviewing pending dump</div>
+              <div class="source">\${escapeHtml(state.reviewingDump.raw_text)}</div>
+            </div>
+            <span class="pill">in review</span>
+          </div>
+          <div class="actions">
+            <button class="secondary" data-action="review-later">Review later</button>
+            <button class="danger" data-action="abandon">Abandon</button>
+          </div>
+        </div>
+      \`;
+      reviewControlsEl.querySelector('[data-action="review-later"]').addEventListener("click", reviewLaterCurrentDump);
+      reviewControlsEl.querySelector('[data-action="abandon"]').addEventListener("click", abandonCurrentDump);
+    }
+
+    function reviewLaterCurrentDump() {
+      const dump = state.reviewingDump;
+      clearCurrentReview();
+      state.reviewSetupDumpId = null;
+      if (dump && !state.pendingDumps.some((candidate) => candidate.id === dump.id)) {
+        state.pendingDumps = [dump, ...state.pendingDumps];
+      }
+      renderPendingDumps();
+      setStatus("Returned dump to pending review.");
+    }
+
+    async function abandonCurrentDump() {
+      if (!state.reviewingDumpId) return;
+      const dumpId = state.reviewingDumpId;
+      clearError();
+      setBusy("Abandoning review...");
+      let abandoned = false;
+      try {
+        await requestJson("/api/dumps/" + encodeURIComponent(dumpId) + "/ignore", {
+          method: "POST",
+          body: {},
+        });
+        clearCurrentReview();
+        await loadPendingDumps();
+        abandoned = true;
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+      if (abandoned) setStatus("Abandoned pending dump.");
+    }
+
+    function clearCurrentReview() {
+      state.reviewingDumpId = null;
+      state.reviewingDump = null;
+      state.reviewSetupDumpId = null;
+      state.rawText = "";
+      $("rawText").value = "";
+      state.suggestions = [];
+      state.rejected = new Set();
+      state.approved = new Set();
+      renderReviewControls();
+      renderSuggestions();
+    }
+
+    async function ignorePendingDump(id) {
+      clearError();
+      setBusy("Ignoring dump...");
+      try {
+        await requestJson("/api/dumps/" + encodeURIComponent(id) + "/ignore", {
+          method: "POST",
+          body: {},
+        });
+        if (state.reviewingDumpId === id) {
+          state.reviewingDumpId = null;
+          state.reviewingDump = null;
+          state.reviewSetupDumpId = null;
+          renderReviewControls();
+        }
+        await loadPendingDumps();
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
       }
     }
 
@@ -503,8 +1106,15 @@ const APP_HTML = `<!doctype html>
         return;
       }
 
+      const visibleSuggestions = state.suggestions.filter((_, index) => !state.approved.has(index));
+      if (visibleSuggestions.length === 0) {
+        suggestionsEl.innerHTML = '<div class="empty">No suggestions left to review.</div>';
+        return;
+      }
+
       suggestionsEl.innerHTML = "";
       state.suggestions.forEach((suggestion, index) => {
+        if (state.approved.has(index)) return;
         const card = document.createElement("div");
         card.className = "card";
         card.dataset.index = String(index);
@@ -566,7 +1176,9 @@ const APP_HTML = `<!doctype html>
         card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approveSuggestion(index, card));
         card.querySelector('[data-action="reject"]')?.addEventListener("click", () => {
           state.rejected.add(index);
-          renderSuggestions();
+          maybeMarkReviewComplete()
+            .then(() => renderSuggestions())
+            .catch((error) => showError(error.message));
         });
         suggestionsEl.appendChild(card);
       });
@@ -576,9 +1188,15 @@ const APP_HTML = `<!doctype html>
       clearError();
       const original = state.suggestions[index];
       const overrides = readOverrides(card, original);
+      const approveButton = card.querySelector('[data-action="approve"]');
+      if (approveButton) {
+        approveButton.disabled = true;
+        approveButton.textContent = "Saving...";
+      }
       setBusy("Saving item...");
+      let savedTitle = "";
       try {
-        await requestJson("/api/items", {
+        const item = await requestJson("/api/items", {
           method: "POST",
           body: {
             rawText: state.rawText,
@@ -586,10 +1204,22 @@ const APP_HTML = `<!doctype html>
             overrides,
           },
         });
+        savedTitle = item.title || overrides.title || original.title || "item";
         state.approved.add(index);
-        await loadItems();
+        renderSuggestions();
+        setStatus("Saved item: " + savedTitle);
+        try {
+          await loadItems();
+          await maybeMarkReviewComplete();
+        } catch (error) {
+          showError("Item was saved, but the pending dump could not be marked reviewed: " + (error instanceof Error ? error.message : String(error)));
+        }
         renderSuggestions();
       } catch (error) {
+        if (approveButton) {
+          approveButton.disabled = false;
+          approveButton.textContent = "Approve";
+        }
         showError(error.message);
       } finally {
         setBusy("");
@@ -616,6 +1246,44 @@ const APP_HTML = `<!doctype html>
       };
     }
 
+    async function maybeMarkReviewComplete() {
+      if (!state.reviewingDumpId || state.suggestions.length === 0) return;
+
+      const complete = state.suggestions.every((_, index) =>
+        state.approved.has(index) || state.rejected.has(index)
+      );
+      if (!complete) return;
+
+      await markCurrentDumpReviewed();
+    }
+
+    async function markCurrentDumpReviewed() {
+      if (!state.reviewingDumpId) return;
+      const dumpId = state.reviewingDumpId;
+      removePendingDumpFromView(dumpId);
+      try {
+        await requestJson("/api/dumps/" + encodeURIComponent(dumpId) + "/reviewed", {
+          method: "POST",
+          body: {},
+        });
+        state.reviewingDumpId = null;
+        state.reviewingDump = null;
+        renderReviewControls();
+        await loadPendingDumps();
+      } catch (error) {
+        state.reviewingDumpId = null;
+        state.reviewingDump = null;
+        renderReviewControls();
+        await loadPendingDumps();
+        throw error;
+      }
+    }
+
+    function removePendingDumpFromView(id) {
+      state.pendingDumps = state.pendingDumps.filter((dump) => dump.id !== id);
+      renderPendingDumps();
+    }
+
     function renderItems() {
       if (state.items.length === 0) {
         itemsEl.innerHTML = '<div class="empty">No saved items yet.</div>';
@@ -633,7 +1301,7 @@ const APP_HTML = `<!doctype html>
               <div class="row-title">\${escapeHtml(item.title)}</div>
               <div class="muted">\${escapeHtml(item.type)} · updated \${escapeHtml(item.updated_at)}</div>
             </div>
-            <span class="pill">\${escapeHtml(item.status)}</span>
+            <span class="pill">\${escapeHtml(displayItemStatus(item.status))}</span>
           </div>
           \${item.description ? '<div>' + escapeHtml(item.description) + '</div>' : ""}
           \${sourceMemo ? '<div class="source">Source memo: ' + escapeHtml(sourceMemo) + '</div>' : ""}
@@ -698,9 +1366,18 @@ const APP_HTML = `<!doctype html>
       return payload;
     }
 
-    function setBusy(message) {
+    function setBusy(message, options = {}) {
       statusEl.textContent = message;
       $("generateBtn").disabled = Boolean(message);
+      $("saveLaterBtn").disabled = Boolean(message);
+      $("addMemoryBtn").disabled = Boolean(message);
+      $("parser").disabled = Boolean(options.disableGenerationSettings);
+      $("useMemory").disabled = Boolean(options.disableGenerationSettings);
+      $("generationSettings").classList.toggle("disabled", Boolean(options.disableGenerationSettings));
+    }
+
+    function setStatus(message) {
+      statusEl.textContent = message;
     }
 
     function showError(message) {
@@ -720,11 +1397,15 @@ const APP_HTML = `<!doctype html>
     }
 
     function statusOptions(current) {
-      const statuses = ["ready", "open", "saved", "waiting", "follow_up", "in_progress", "done", "archived"];
+      const statuses = ["ready", "open", "saved", "waiting", "in_progress", "done", "archived"];
       if (!statuses.includes(current)) statuses.unshift(current);
       return statuses.map((status) =>
         '<option value="' + escapeAttr(status) + '" ' + (status === current ? "selected" : "") + '>' + escapeHtml(status) + '</option>'
       ).join("");
+    }
+
+    function displayItemStatus(status) {
+      return ["ready", "open", "saved"].includes(status) ? "ready" : status;
     }
 
     function escapeHtml(value) {
@@ -739,6 +1420,14 @@ const APP_HTML = `<!doctype html>
 
     function escapeAttr(value) {
       return escapeHtml(value).replace(/\\n/g, " ");
+    }
+
+    function debounce(fn, delay) {
+      let timeout = null;
+      return (...args) => {
+        window.clearTimeout(timeout);
+        timeout = window.setTimeout(() => fn(...args), delay);
+      };
     }
   </script>
 </body>

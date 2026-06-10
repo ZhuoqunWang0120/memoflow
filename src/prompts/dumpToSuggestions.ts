@@ -7,10 +7,8 @@ export function buildDumpToSuggestionsPrompt(input: {
   context?: ContextBundle;
 }): string {
   const currentDate = getLocalDateString();
-  const contextText =
-    input.context && Object.keys(input.context).length > 0
-      ? `\nOptional context:\n${JSON.stringify(input.context, null, 2)}\n`
-      : "";
+  const userMemoryText = buildUserMemoryText(input.context?.snippets);
+  const contextText = buildAdditionalContextText(input.context);
 
   return `Transform the raw memo dump into structured suggestions.
 
@@ -57,6 +55,9 @@ Instructions:
 - If the memo gives only imprecise timing such as "this week" or "soon", set due_date to null and preserve the timing text in the description.
 - If due_date is set, format it as YYYY-MM-DD.
 - Set waiting_on only when the user is actually blocked by or waiting for another person. Do not set waiting_on just because a task involves contacting someone.
+- User memory is optional context only. Use it to resolve names, shorthand, or personal context when it directly helps interpret the raw memo.
+- If user memory conflicts with the raw memo, the raw memo wins.
+- If user memory is insufficient to resolve ambiguity, preserve uncertainty and use clarify_needed.
 
 Expected JSON shape:
 {
@@ -82,9 +83,37 @@ Expected JSON shape:
   ]
 }
 
+${userMemoryText}
+${contextText}
+
 Raw memo:
-${input.rawText}
-${contextText}`;
+${input.rawText}`;
+}
+
+function buildUserMemoryText(snippets: string[] | undefined): string {
+  const compact = (snippets ?? [])
+    .map((snippet) => snippet.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+
+  if (compact.length === 0) return "";
+
+  return `User memory:
+${compact.map((snippet) => `- ${snippet}`).join("\n")}
+`;
+}
+
+function buildAdditionalContextText(context: ContextBundle | undefined): string {
+  if (!context) return "";
+
+  const rest = Object.fromEntries(
+    Object.entries(context).filter(([key, value]) => key !== "snippets" && value !== undefined),
+  );
+
+  if (Object.keys(rest).length === 0) return "";
+  return `Additional optional context:
+${JSON.stringify(rest, null, 2)}
+`;
 }
 
 function buildCompactDefinitions(): string {

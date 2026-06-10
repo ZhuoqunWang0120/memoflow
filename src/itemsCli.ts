@@ -8,21 +8,27 @@ import { createSuggestionsFromDump } from "./services/suggestionService.js";
 import { suggestionToAddItemInput, type SuggestionApprovalOverrides } from "./services/suggestionApprovalService.js";
 import type { ParserName } from "./parsers/types.js";
 import type { Suggestion } from "./schemas/suggestion.js";
+import { addDump, getDump, ignoreDump, listPending, markReviewed } from "./services/dumpStoreService.js";
+import { ItemSortOptionValues, type ArchivedVisibility, type ItemSortOption } from "./services/itemLedgerQuery.js";
 
 type ParsedCommand =
-  | { command: "list"; includeArchived: boolean }
+  | { command: "list"; archived: ArchivedVisibility; type?: ItemType; status?: string; query?: string; sort?: ItemSortOption }
   | { command: "add"; input: AddItemInput }
   | { command: "update"; id: string; patch: UpdateItemInput }
   | { command: "archive"; id: string }
-  | { command: "export-csv"; includeArchived: boolean }
-  | { command: "review-dump"; parser: ParserName; rawText: string };
+  | { command: "export-csv"; archived: ArchivedVisibility; type?: ItemType; status?: string; query?: string; sort?: ItemSortOption }
+  | { command: "review-dump"; parser: ParserName; rawText: string; dumpId?: string }
+  | { command: "dump-save"; rawText: string }
+  | { command: "dump-list"; includeIgnored: boolean; includeReviewed: boolean }
+  | { command: "dump-ignore"; id: string }
+  | { command: "dump-review"; id: string; parser: ParserName };
 
 async function main(): Promise<void> {
   const command = parseCommand(process.argv.slice(2));
 
   switch (command.command) {
     case "list": {
-      const items = await list({ includeArchived: command.includeArchived });
+      const items = await list(command);
       console.log(JSON.stringify({ items }, null, 2));
       return;
     }
@@ -42,12 +48,35 @@ async function main(): Promise<void> {
       return;
     }
     case "export-csv": {
-      const csv = await exportCsv({ includeArchived: command.includeArchived });
+      const csv = await exportCsv(command);
       console.log(csv);
       return;
     }
     case "review-dump": {
-      await reviewDump(command.rawText, command.parser);
+      await reviewDump(command.rawText, command.parser, command.dumpId);
+      return;
+    }
+    case "dump-save": {
+      const dump = await addDump({ rawText: command.rawText, source: "cli" });
+      console.log(JSON.stringify(dump, null, 2));
+      return;
+    }
+    case "dump-list": {
+      const dumps = await listPending({
+        includeIgnored: command.includeIgnored,
+        includeReviewed: command.includeReviewed,
+      });
+      console.log(JSON.stringify({ dumps }, null, 2));
+      return;
+    }
+    case "dump-ignore": {
+      const dump = await ignoreDump(command.id);
+      console.log(JSON.stringify(dump, null, 2));
+      return;
+    }
+    case "dump-review": {
+      const dump = await getDump(command.id);
+      await reviewDump(dump.raw_text, command.parser, dump.id);
       return;
     }
   }
@@ -63,7 +92,7 @@ function parseCommand(argv: string[]): ParsedCommand {
 
   switch (command) {
     case "list":
-      return { command, includeArchived: hasFlag(rest, "--include-archived") };
+      return { command, ...parseLedgerQueryOptions(rest) };
     case "add":
       return { command, input: parseAdd(rest) };
     case "update": {
@@ -77,16 +106,31 @@ function parseCommand(argv: string[]): ParsedCommand {
       return { command, id };
     }
     case "export-csv":
-      return { command, includeArchived: hasFlag(rest, "--include-archived") };
+      return { command, ...parseLedgerQueryOptions(rest) };
     case "review-dump":
       return parseReviewDump(rest);
+    case "dump-save":
+      return parseDumpSave(rest);
+    case "dump-list":
+      return {
+        command,
+        includeIgnored: hasFlag(rest, "--include-ignored"),
+        includeReviewed: hasFlag(rest, "--include-reviewed"),
+      };
+    case "dump-ignore": {
+      const id = rest[0];
+      if (!id) throw new Error("Dump id is required for dump-ignore.");
+      return { command, id };
+    }
+    case "dump-review":
+      return parseDumpReview(rest);
     default:
       printHelp();
       throw new Error(`Unknown item command: ${command}`);
   }
 }
 
-async function reviewDump(rawText: string, parser: ParserName): Promise<void> {
+async function reviewDump(rawText: string, parser: ParserName, dumpId?: string): Promise<void> {
   const result = await createSuggestionsFromDump({ rawText }, { parser });
   const savedItems = [];
   const rl = createInterface({ input, output });
@@ -139,6 +183,10 @@ async function reviewDump(rawText: string, parser: ParserName): Promise<void> {
     rl.close();
   }
 
+  if (dumpId) {
+    await markReviewed(dumpId);
+  }
+
   console.log(JSON.stringify({ saved_items: savedItems }, null, 2));
 }
 
@@ -177,6 +225,46 @@ function parseReviewDump(argv: string[]): ParsedCommand {
   }
 
   return { command: "review-dump", parser, rawText };
+}
+
+function parseDumpSave(argv: string[]): ParsedCommand {
+  const rawText = argv.join(" ").trim();
+  if (!rawText) throw new Error("Raw memo text is required for dump-save.");
+  return { command: "dump-save", rawText };
+}
+
+function parseDumpReview(argv: string[]): ParsedCommand {
+  let parser: ParserName = "stub";
+  const ids: string[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    if (arg === "--parser") {
+      const value = argv[index + 1];
+      if (value !== "stub" && value !== "llm") {
+        throw new Error('--parser must be either "stub" or "llm".');
+      }
+      parser = value;
+      index += 1;
+      continue;
+    }
+
+    if (arg?.startsWith("--parser=")) {
+      const value = arg.slice("--parser=".length);
+      if (value !== "stub" && value !== "llm") {
+        throw new Error('--parser must be either "stub" or "llm".');
+      }
+      parser = value;
+      continue;
+    }
+
+    if (arg) ids.push(arg);
+  }
+
+  const id = ids[0];
+  if (!id) throw new Error("Dump id is required for dump-review.");
+  return { command: "dump-review", id, parser };
 }
 
 function printSuggestion(suggestion: Suggestion, index: number, total: number): void {
@@ -277,17 +365,55 @@ function parseFields(argv: string[]): ItemFields {
   const fields: ItemFields = {};
   const category = optionValue(argv, "--category");
   const dueDate = optionValue(argv, "--due-date");
+  const followUpDate = optionValue(argv, "--follow-up-date");
   const waitingOn = optionValue(argv, "--waiting-on");
   const url = optionValue(argv, "--url");
 
   if (category !== undefined) fields.category = category;
   if (dueDate !== undefined) fields.due_date = dueDate;
+  if (followUpDate !== undefined) fields.follow_up_date = followUpDate;
   if (waitingOn !== undefined) fields.waiting_on = waitingOn;
   if (url !== undefined) fields.url = url;
   if (tags !== undefined) fields.tags = tags.split(",").map((tag) => tag.trim()).filter(Boolean);
   if (followUpNeeded !== undefined) fields.follow_up_needed = parseBoolean(followUpNeeded);
 
   return fields;
+}
+
+function parseLedgerQueryOptions(argv: string[]): {
+  archived: ArchivedVisibility;
+  type?: ItemType;
+  status?: string;
+  query?: string;
+  sort?: ItemSortOption;
+} {
+  const archived = parseArchivedVisibility(argv);
+  const typeValue = optionValue(argv, "--type");
+  const sortValue = optionValue(argv, "--sort");
+
+  if (sortValue !== undefined && !ItemSortOptionValues.includes(sortValue as ItemSortOption)) {
+    throw new Error(`Invalid --sort value. Use one of: ${ItemSortOptionValues.join(", ")}`);
+  }
+
+  return {
+    archived,
+    type: typeValue ? parseItemType(typeValue) : undefined,
+    status: optionValue(argv, "--status"),
+    query: optionValue(argv, "--query"),
+    sort: sortValue as ItemSortOption | undefined,
+  };
+}
+
+function parseArchivedVisibility(argv: string[]): ArchivedVisibility {
+  const value = optionValue(argv, "--archived");
+  if (value !== undefined) {
+    if (value === "hide" || value === "show" || value === "only") return value;
+    throw new Error('--archived must be "hide", "show", or "only".');
+  }
+
+  if (hasFlag(argv, "--archived-only")) return "only";
+  if (hasFlag(argv, "--include-archived")) return "show";
+  return "hide";
 }
 
 function optionValue(argv: string[], name: string): string | undefined {
@@ -345,16 +471,30 @@ function printHelp(): void {
   npm run items -- archive <id>
   npm run items -- export-csv [--include-archived]
   npm run items -- review-dump [--parser stub|llm] "raw memo text"
+  npm run items -- dump-save "raw memo text"
+  npm run items -- dump-list [--include-ignored] [--include-reviewed]
+  npm run items -- dump-review <dump_id> [--parser stub|llm]
+  npm run items -- dump-ignore <dump_id>
 
 Options:
   --description "Text"
   --status "ready"
   --category "personal"
   --due-date YYYY-MM-DD
+  --follow-up-date YYYY-MM-DD
   --waiting-on "Name"
   --url "https://..."
   --tags "tag1,tag2"
   --follow-up-needed true|false
+
+List/export filters:
+  --query "text"
+  --type task|exploration|idea|reference
+  --status ready
+  --archived hide|show|only
+  --include-archived
+  --archived-only
+  --sort created_at_desc|created_at_asc|updated_at_desc|updated_at_asc|due_date_asc|follow_up_date_asc|type_asc|status_asc
 `);
 }
 

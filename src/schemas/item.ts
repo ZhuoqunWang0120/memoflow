@@ -11,6 +11,7 @@ export const ItemFieldsSchema = z
   .object({
     follow_up_needed: z.boolean().nullable().optional(),
     due_date: z.string().nullable().optional(),
+    follow_up_date: z.string().nullable().optional(),
     waiting_on: z.string().nullable().optional(),
     url: z.string().nullable().optional(),
     tags: z.array(z.string()).nullable().optional(),

@@ -692,6 +692,174 @@ Known remaining limitations:
 - Date inference is still LLM-first and may occasionally need user correction.
 - Stub parser remains heuristic and exists mainly for deterministic local evals.
 
+## Quick Dump / Pending Review
+
+Implemented on 2026-06-09.
+
+Goal:
+
+```text
+raw dump
+-> save without generating suggestions
+-> pending review queue
+-> review later through existing suggestion approval flow
+```
+
+Canonical dump store:
+
+```text
+data/dumps.jsonl
+```
+
+Dump statuses:
+
+```text
+pending
+reviewed
+ignored
+```
+
+Added:
+
+- `src/schemas/dump.ts`
+- `src/services/dumpStoreService.ts`
+- web API routes:
+  - `GET /api/dumps`
+  - `POST /api/dumps`
+  - `POST /api/dumps/:id/ignore`
+  - `POST /api/dumps/:id/reviewed`
+- CLI commands:
+
+```bash
+npm run items -- dump-save "raw memo"
+npm run items -- dump-list
+npm run items -- dump-list --include-ignored --include-reviewed
+npm run items -- dump-review <dump_id>
+npm run items -- dump-review <dump_id> --parser llm
+npm run items -- dump-ignore <dump_id>
+```
+
+Web UI updates:
+
+- Raw Memo now has:
+  - `Save for later`
+  - `Generate suggestions now`
+- Added `Pending Review` list.
+- Each pending dump has:
+  - `Review now`
+  - `Ignore`
+- `Review now` loads the dump into the existing suggestion card flow.
+- A pending dump is marked `reviewed` once all generated suggestion cards have
+  been approved or rejected.
+
+Non-goals preserved:
+
+- No memory.
+- No dedup.
+- No RAG.
+- No reminders.
+- No auth.
+- No database migration.
+
+## Deterministic Item Ledger Search/Filter/Sort
+
+Implemented on 2026-06-09.
+
+Goal:
+
+```text
+saved items
+-> deterministic search/filter/sort
+-> predictable item ledger view
+```
+
+No LLMs are used for ledger browsing. The LLM remains limited to suggestion
+generation and interpretation. Canonical item browsing is user-controlled and
+transparent.
+
+Added reusable helper:
+
+```text
+src/services/itemLedgerQuery.ts
+```
+
+Main functions:
+
+```ts
+searchItems(items, query)
+filterItems(items, filters)
+sortItems(items, sortOption)
+getVisibleItems(items, { filters, sort, query })
+```
+
+Supported sort options:
+
+```text
+created_at_desc
+created_at_asc
+updated_at_desc
+updated_at_asc
+due_date_asc
+follow_up_date_asc
+type_asc
+status_asc
+```
+
+Rules:
+
+- Default sort is `updated_at_desc`.
+- Archived items are hidden by default.
+- Archived modes:
+  - `hide`
+  - `show`
+  - `only`
+- Missing `due_date` and `follow_up_date` sort after dated items.
+- Sorts are stable where values compare equal.
+- Search is case-insensitive substring matching over:
+  - title
+  - description
+  - source raw memo text
+- No fuzzy search, embeddings, semantic search, RAG, auto-tagging, grouping, or
+  organization suggestions.
+
+CLI examples:
+
+```bash
+npm run items -- list --query duke
+npm run items -- list --type task --status waiting
+npm run items -- list --archived show --sort due_date_asc
+npm run items -- list --archived only
+npm run items -- export-csv --query duke --sort updated_at_desc
+```
+
+Web UI updates:
+
+- Search input at top of saved item list.
+- Type filter.
+- Status filter.
+- Archived visibility selector.
+- Sort dropdown.
+- Clear filters button.
+
+Test coverage:
+
+```bash
+npm run eval:items
+```
+
+Covered:
+
+- default list hides archived items
+- type filter
+- status filter
+- combined type + status filters
+- title search, case-insensitive
+- description search, case-insensitive
+- missing due dates sort last
+- due date soonest sort
+- follow-up date soonest sort
+- archived visibility modes
+
 ## Local Webapp v0
 
 Implementation completed:
@@ -788,7 +956,129 @@ running for manual browser testing.
 Known webapp limitations:
 
 - Styling is intentionally simple.
-- No complex filtering/search/grouping.
-- No include-archived toggle in the web UI yet.
+- Filtering/search/sort are deterministic and intentionally simple.
 - No full JSON editor for suggestions/items.
 - No auth, database, sync, reminders, imports, RAG, or mobile/PWA layer.
+
+## Item Status Cleanup
+
+Decision:
+
+- Keep the stored item status as a raw string for compatibility.
+- Keep default type-specific statuses in code/storage:
+  - `task -> ready`
+  - `exploration -> open`
+  - `idea/reference -> saved`
+- In the web item ledger, display `ready`, `open`, and `saved` as `ready` so the
+  UI does not make those defaults look like different lifecycle states.
+- Keep raw/exact status filtering. For example, filtering by `ready` only matches
+  raw `ready` items, not raw `open` or `saved` items.
+- Stop offering `follow_up` as a normal status choice. Follow-up intent should be
+  represented with item fields such as `follow_up_date`, `follow_up_needed`, and
+  `waiting_on`.
+- Continue allowing existing/legacy status strings because the Item schema is
+  permissive. Legacy values such as `follow_up` or `parked` can still render and
+  be preserved if they already exist, but they are not normal UI choices.
+
+Protected behavior:
+
+- `needs_clarification` remains suggestion-only behavior and is not a normal
+  Item status option.
+- Parking lot / legacy parked values are not migrated or invalidated.
+- Save for later / Pending Review dump behavior remains unchanged.
+
+## Freeform Memory
+
+Implemented on 2026-06-09.
+
+Goal:
+
+```text
+user-created freeform memory
+-> optional lightweight context
+-> future suggestion generation
+```
+
+Canonical memory store:
+
+```text
+data/memory.jsonl
+```
+
+Added:
+
+- `src/schemas/memory.ts`
+- `src/services/memoryStoreService.ts`
+- `src/eval/runMemoryEval.ts`
+- web API routes:
+  - `GET /api/memory`
+  - `POST /api/memory`
+  - `PATCH /api/memory/:id`
+  - `POST /api/memory/:id/archive`
+  - `DELETE /api/memory/:id`
+
+Memory entry shape:
+
+```ts
+{
+  id: "mem_<uuid>",
+  text: string,
+  created_at: string,
+  updated_at: string,
+  archived_at: string | null
+}
+```
+
+Product decisions:
+
+- Memory is freeform text only.
+- Users do not fill structured `type/key/value` fields.
+- Memory is user-created and user-controlled.
+- The LLM must not auto-extract, rewrite, classify, or create memory.
+- `Use memory` is off by default in the web UI.
+- When enabled, the suggestion API injects at most the 20 most recently updated
+  active memory entries as prompt context.
+- Archived memory is hidden by default and is not injected into prompts.
+- Memory is context only. If memory conflicts with the current raw dump, the raw
+  dump wins.
+- If memory is insufficient to resolve ambiguity, the model should still return
+  `clarify_needed`.
+- Memory supports archive and hard delete. Archive remains the soft-delete path;
+  hard delete is available because memory can contain sensitive user context.
+
+Non-goals preserved:
+
+- No automatic memory suggestions.
+- No embeddings.
+- No vector search.
+- No RAG.
+- No semantic retrieval or ranking.
+- No database migration.
+- No auth or sync.
+
+Verification:
+
+```bash
+npm run eval:memory
+```
+
+Covered:
+
+- adding memory
+- rejecting empty memory
+- listing active memory
+- archiving memory
+- archived memory hidden by default
+- updating memory text
+- hard delete
+- active-memory prompt inclusion only through explicit context
+- archived memory excluded from active helper
+- suggestion generation without a memory file
+
+## Remaining Fixes
+
+- UX: approving a `clarify_needed` suggestion currently surfaces a technical
+  error from the item approval service. The behavior is correct because
+  `clarify_needed` is not directly persistable as an Item, but the web UI should
+  show a friendlier message and guide the user to edit the type/title/status
+  before approving.

@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { ItemSchema, ItemTypeSchema, type Item, type ItemFields, type ItemType } from "../schemas/item.js";
+import { getVisibleItems, type ArchivedVisibility, type ItemSortOption } from "./itemLedgerQuery.js";
 
 const DEFAULT_STORE_PATH = join(process.cwd(), "data", "items.jsonl");
 
@@ -11,6 +12,11 @@ export type ItemStoreOptions = {
 
 export type ListItemsOptions = ItemStoreOptions & {
   includeArchived?: boolean;
+  archived?: ArchivedVisibility;
+  type?: ItemType;
+  status?: string;
+  query?: string;
+  sort?: ItemSortOption;
 };
 
 export type AddItemInput = {
@@ -34,7 +40,16 @@ export type UpdateItemInput = {
 
 export async function list(options: ListItemsOptions = {}): Promise<Item[]> {
   const items = await readItems(options.storePath);
-  return options.includeArchived ? items : items.filter((item) => !item.archived_at);
+  const archived = options.archived ?? (options.includeArchived ? "show" : "hide");
+  return getVisibleItems(items, {
+    query: options.query,
+    sort: options.sort,
+    filters: {
+      archived,
+      type: options.type,
+      status: options.status,
+    },
+  });
 }
 
 export async function add(input: AddItemInput, options: ItemStoreOptions = {}): Promise<Item> {
@@ -97,6 +112,7 @@ export async function exportCsv(options: ListItemsOptions = {}): Promise<string>
     "description",
     "status",
     "due_date",
+    "follow_up_date",
     "waiting_on",
     "follow_up_needed",
     "url",
@@ -114,6 +130,7 @@ export async function exportCsv(options: ListItemsOptions = {}): Promise<string>
     item.description ?? "",
     item.status,
     item.fields.due_date ?? "",
+    item.fields.follow_up_date ?? "",
     item.fields.waiting_on ?? "",
     item.fields.follow_up_needed ?? "",
     item.fields.url ?? "",

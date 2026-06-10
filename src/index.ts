@@ -1,8 +1,13 @@
 export * from "./schemas/suggestion.js";
 export * from "./schemas/item.js";
+export * from "./schemas/dump.js";
+export * from "./schemas/memory.js";
 export * from "./services/suggestionService.js";
 export * from "./services/itemStoreService.js";
+export * from "./services/itemLedgerQuery.js";
 export * from "./services/suggestionApprovalService.js";
+export * from "./services/dumpStoreService.js";
+export * from "./services/memoryStoreService.js";
 export * from "./parsers/types.js";
 export { stubSuggestionParser } from "./parsers/stubSuggestionParser.js";
 export { createOpenAiSuggestionParser } from "./parsers/openAiSuggestionParser.js";
