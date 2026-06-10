@@ -52,6 +52,13 @@ export async function list(options: ListItemsOptions = {}): Promise<Item[]> {
   });
 }
 
+export async function get(id: string, options: ItemStoreOptions = {}): Promise<Item> {
+  const items = await readItems(options.storePath);
+  const item = items.find((candidate) => candidate.id === id);
+  if (!item) throw new Error(`Item not found: ${id}`);
+  return item;
+}
+
 export async function add(input: AddItemInput, options: ItemStoreOptions = {}): Promise<Item> {
   const now = new Date().toISOString();
   const item = ItemSchema.parse({
@@ -85,11 +92,12 @@ export async function update(id: string, patch: UpdateItemInput, options: ItemSt
     throw new Error(`Item not found: ${id}`);
   }
 
+  const sanitized = sanitizeUpdatePatch(patch);
   const next = ItemSchema.parse({
     ...existing,
-    ...omitNullishDescription(patch),
-    fields: patch.fields ? { ...existing.fields, ...patch.fields } : existing.fields,
-    source: patch.source === null ? undefined : patch.source ?? existing.source,
+    ...sanitized.itemPatch,
+    fields: sanitized.fields ? { ...existing.fields, ...sanitized.fields } : existing.fields,
+    source: sanitized.clearSource ? undefined : sanitized.source ?? existing.source,
     updated_at: new Date().toISOString(),
   });
 
@@ -193,15 +201,46 @@ function defaultStatusForType(type: ItemType): string {
   }
 }
 
-function omitNullishDescription(patch: UpdateItemInput): UpdateItemInput {
-  const result = { ...patch };
-  if (result.description === null) {
-    delete result.description;
+function sanitizeUpdatePatch(patch: UpdateItemInput): {
+  itemPatch: Partial<Pick<Item, "type" | "title" | "description" | "status" | "archived_at">>;
+  fields?: ItemFields;
+  source?: Item["source"];
+  clearSource?: boolean;
+} {
+  const itemPatch: Partial<Pick<Item, "type" | "title" | "description" | "status" | "archived_at">> = {};
+
+  if (patch.type !== undefined) {
+    itemPatch.type = ItemTypeSchema.parse(patch.type);
   }
-  if (result.type !== undefined) {
-    ItemTypeSchema.parse(result.type);
+
+  if (patch.title !== undefined) {
+    const title = patch.title.trim();
+    if (!title) throw new Error("Item title is required.");
+    itemPatch.title = title;
   }
-  return result;
+
+  if (patch.description !== undefined) {
+    const description = patch.description?.trim() ?? "";
+    if (description) itemPatch.description = description;
+    else itemPatch.description = undefined;
+  }
+
+  if (patch.status !== undefined) {
+    const status = patch.status.trim();
+    if (!status) throw new Error("Item status is required.");
+    itemPatch.status = status;
+  }
+
+  if (patch.archived_at !== undefined) {
+    itemPatch.archived_at = patch.archived_at;
+  }
+
+  return {
+    itemPatch,
+    fields: patch.fields,
+    source: patch.source ?? undefined,
+    clearSource: patch.source === null,
+  };
 }
 
 function csvCell(value: unknown): string {

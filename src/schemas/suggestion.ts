@@ -21,6 +21,13 @@ export const SuggestedFieldsSchema = z
   })
   .catchall(z.unknown());
 
+export const RelatedExistingItemSchema = z.object({
+  item_id: z.string().min(1),
+  relationship: z.enum(["possible_duplicate", "follow_up", "same_topic"]),
+  reason: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+});
+
 export const SuggestionSchema = z
   .object({
     type: SuggestionTypeSchema,
@@ -32,6 +39,7 @@ export const SuggestionSchema = z
     clarification_question: z.string().min(1).optional(),
     missing_context: z.array(z.string()).optional(),
     suggested_fields: SuggestedFieldsSchema.optional().default({}),
+    related_existing_items: z.array(RelatedExistingItemSchema).optional(),
   })
   .catchall(z.unknown());
 
@@ -44,5 +52,6 @@ export const SuggestionResultSchema = z
 export type SuggestionType = z.infer<typeof SuggestionTypeSchema>;
 export type SuggestionStatus = z.infer<typeof SuggestionStatusSchema>;
 export type SuggestedFields = z.infer<typeof SuggestedFieldsSchema>;
+export type RelatedExistingItem = z.infer<typeof RelatedExistingItemSchema>;
 export type Suggestion = z.infer<typeof SuggestionSchema>;
 export type SuggestionResult = z.infer<typeof SuggestionResultSchema>;

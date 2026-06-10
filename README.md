@@ -153,6 +153,12 @@ npm run items -- export-csv --query duke --sort updated_at_desc > items.csv
 Item ledger browsing is deterministic. Search, filters, and sort do not use
 LLMs, embeddings, semantic search, RAG, auto-tagging, or grouping.
 
+Existing items can be edited manually from the Item Ledger. Edits are
+deterministic and user-controlled: MemoFlow updates the canonical item record in
+`data/items.jsonl`, sets `updated_at`, and does not use an LLM to rewrite,
+merge, or modify existing items. This same manual editor supports the `Update
+existing instead` flow when a new suggestion looks related to an existing item.
+
 MemoFlow also supports freeform user memory stored locally in `data/memory.jsonl`.
 Memory is user-created and user-controlled: the LLM does not automatically
 extract, rewrite, classify, or create memory. In the web UI, `Use memory` is off
@@ -160,6 +166,18 @@ by default; when enabled, active non-archived memory entries are injected into
 suggestion generation as lightweight context. Archived memory is hidden by
 default and is not used in prompts. This is not RAG, embedding retrieval, or
 automatic memory management.
+
+Suggestion generation can also use `Use context` for creation-time duplicate
+awareness. Context includes active memory, deterministic keyword-matched items,
+recent active items, and a capped semantic scan list of up to 100 active
+non-done items. With the LLM parser, MemoFlow runs a small dedicated semantic
+relation scan so the model can attach advisory `related_existing_items` for
+duplicates, follow-ups, or same-topic items even when exact tokens do not
+overlap. Strong deterministic keyword overlap can also add a fallback
+possible-duplicate relation. This is advisory only: the user can create a new
+item anyway, manually update an existing item instead, or discard the suggestion.
+MemoFlow does not auto-merge, auto-update, auto-archive, use embeddings, or
+perform full RAG.
 
 Status display note: item statuses are stored as raw values, but the web ledger
 displays the default per-type states `ready`, `open`, and `saved` as `ready`.
@@ -195,6 +213,7 @@ npm run check
 npm run eval
 npm run eval:items
 npm run eval:memory
+npm run eval:context
 ```
 
 Core source:

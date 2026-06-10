@@ -11,6 +11,7 @@
     "eval": "npm run build --silent && node dist/eval/runEval.js",
     "eval:items": "npm run build --silent && node dist/eval/runItemLedgerEval.js",
     "eval:memory": "npm run build --silent && node dist/eval/runMemoryEval.js",
+    "eval:context": "npm run build --silent && node dist/eval/runContextEval.js",
     "check": "tsc --noEmit"
   },
   "dependencies": {

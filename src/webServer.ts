@@ -5,12 +5,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join } from "node:path";
 import { z } from "zod";
 import { createSuggestionsFromDump } from "./services/suggestionService.js";
-import { add, archive, list, update } from "./services/itemStoreService.js";
+import { add, archive, get, list, update } from "./services/itemStoreService.js";
 import { suggestionToAddItemInput } from "./services/suggestionApprovalService.js";
 import { ItemFieldsSchema, ItemTypeSchema } from "./schemas/item.js";
 import { SuggestionSchema } from "./schemas/suggestion.js";
 import { addDump, ignoreDump, listPending, markReviewed } from "./services/dumpStoreService.js";
 import { ItemSortOptionValues, type ArchivedVisibility, type ItemSortOption } from "./services/itemLedgerQuery.js";
+import { itemUpdatePatchFromRequest, UpdateItemRequestSchema } from "./services/itemUpdatePatch.js";
 import {
   addMemory,
   archiveMemory,
@@ -19,6 +20,7 @@ import {
   listMemory,
   updateMemory,
 } from "./services/memoryStoreService.js";
+import { buildSuggestionContext } from "./services/suggestionContextService.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -29,6 +31,7 @@ const GenerateSuggestionsRequestSchema = z.object({
   rawText: z.string().trim().min(1, "rawText is required"),
   parser: z.enum(["stub", "llm"]).optional().default("stub"),
   useMemory: z.boolean().optional().default(false),
+  useContext: z.boolean().optional().default(false),
 });
 
 const ApprovalOverridesSchema = z.object({
@@ -57,14 +60,6 @@ const UpdateMemoryRequestSchema = z.object({
   text: z.string().trim().min(1, "Memory text is required"),
 });
 
-const UpdateItemRequestSchema = z.object({
-  type: ItemTypeSchema.optional(),
-  title: z.string().trim().min(1).optional(),
-  description: z.string().nullable().optional(),
-  status: z.string().trim().min(1).optional(),
-  fields: ItemFieldsSchema.optional(),
-});
-
 const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/") {
@@ -80,11 +75,16 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/api/suggestions") {
       const body = GenerateSuggestionsRequestSchema.parse(await readJson(req));
-      const memory = body.useMemory ? await getActiveMemory({ limit: 20 }) : [];
+      const suggestionContext = body.useContext ? await buildSuggestionContext(body.rawText) : undefined;
+      const memory = !body.useContext && body.useMemory ? await getActiveMemory({ limit: 20 }) : [];
       const result = await createSuggestionsFromDump(
         {
           rawText: body.rawText,
-          context: body.useMemory ? { snippets: memory.map((entry) => entry.text) } : undefined,
+          context: body.useContext
+            ? { suggestionContext }
+            : body.useMemory
+              ? { snippets: memory.map((entry) => entry.text) }
+              : undefined,
         },
         { parser: body.parser },
       );
@@ -127,7 +127,14 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && req.url?.startsWith("/api/items")) {
+    const itemMatch = req.url?.match(/^\/api\/items\/([^/]+)$/);
+    if (req.method === "GET" && itemMatch?.[1]) {
+      const item = await get(decodeURIComponent(itemMatch[1]));
+      sendJson(res, 200, item);
+      return;
+    }
+
+    if (req.method === "GET" && (req.url === "/api/items" || req.url?.startsWith("/api/items?"))) {
       const params = new URL(req.url, `http://${HOST}:${PORT}`).searchParams;
       const type = params.get("type");
       const items = await list({
@@ -187,10 +194,9 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const itemMatch = req.url?.match(/^\/api\/items\/([^/]+)$/);
     if (req.method === "PATCH" && itemMatch?.[1]) {
       const body = UpdateItemRequestSchema.parse(await readJson(req));
-      const item = await update(decodeURIComponent(itemMatch[1]), body);
+      const item = await update(decodeURIComponent(itemMatch[1]), itemUpdatePatchFromRequest(body));
       sendJson(res, 200, item);
       return;
     }
@@ -563,6 +569,10 @@ const APP_HTML = `<!doctype html>
               <input id="useMemory" type="checkbox" />
               Use memory
             </label>
+            <label class="checkbox-row">
+              <input id="useContext" type="checkbox" />
+              Use context
+            </label>
             <button id="generateBtn">Generate suggestions now</button>
           </div>
           <span id="status" class="muted"></span>
@@ -670,6 +680,10 @@ const APP_HTML = `<!doctype html>
       items: [],
       pendingDumps: [],
       memory: [],
+      editingExistingForSuggestion: null,
+      relatedItems: {},
+      loadingRelatedItems: new Set(),
+      editingItemId: null,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -725,6 +739,8 @@ const APP_HTML = `<!doctype html>
         state.suggestions = [];
         state.rejected = new Set();
         state.approved = new Set();
+        state.relatedItems = {};
+        state.loadingRelatedItems = new Set();
         renderReviewControls();
         renderSuggestions();
         await loadPendingDumps();
@@ -740,6 +756,7 @@ const APP_HTML = `<!doctype html>
       const rawText = (settings.rawText ?? $("rawText").value).trim();
       const parser = settings.parser ?? $("parser").value;
       const useMemory = settings.useMemory ?? $("useMemory").checked;
+      const useContext = settings.useContext ?? $("useContext").checked;
       if (!rawText) {
         showError("Enter a memo dump first.");
         return;
@@ -750,11 +767,13 @@ const APP_HTML = `<!doctype html>
       try {
         const result = await requestJson("/api/suggestions", {
           method: "POST",
-          body: { rawText, parser, useMemory },
+          body: { rawText, parser, useMemory, useContext },
         });
         state.suggestions = result.suggestions || [];
         state.rejected = new Set();
         state.approved = new Set();
+        state.relatedItems = {};
+        state.loadingRelatedItems = new Set();
         renderReviewControls();
         renderSuggestions();
       } catch (error) {
@@ -957,6 +976,10 @@ const APP_HTML = `<!doctype html>
                   '<input data-review-memory type="checkbox" />' +
                   'Use memory' +
                 '</label>' +
+                '<label class="checkbox-row">' +
+                  '<input data-review-context type="checkbox" />' +
+                  'Use context' +
+                '</label>' +
                 '<button data-action="generate-review">Generate review</button>' +
                 '<button class="secondary" data-action="cancel-review-setup">Cancel</button>' +
               '</div>' +
@@ -981,7 +1004,8 @@ const APP_HTML = `<!doctype html>
         card.querySelector('[data-action="generate-review"]')?.addEventListener("click", () => {
           const parser = card.querySelector("[data-review-parser]").value;
           const useMemory = card.querySelector("[data-review-memory]").checked;
-          startPendingDumpReview(dump, { parser, useMemory });
+          const useContext = card.querySelector("[data-review-context]").checked;
+          startPendingDumpReview(dump, { parser, useMemory, useContext });
         });
         card.querySelector('[data-action="cancel-review-setup"]')?.addEventListener("click", () => {
           state.reviewSetupDumpId = null;
@@ -1003,7 +1027,12 @@ const APP_HTML = `<!doctype html>
       state.reviewSetupDumpId = null;
       removePendingDumpFromView(dump.id);
       renderReviewControls();
-      await generateSuggestions({ rawText: dump.raw_text, parser: settings.parser, useMemory: settings.useMemory });
+      await generateSuggestions({
+        rawText: dump.raw_text,
+        parser: settings.parser,
+        useMemory: settings.useMemory,
+        useContext: settings.useContext,
+      });
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -1074,6 +1103,10 @@ const APP_HTML = `<!doctype html>
       state.suggestions = [];
       state.rejected = new Set();
       state.approved = new Set();
+      state.editingExistingForSuggestion = null;
+      state.editingItemId = null;
+      state.relatedItems = {};
+      state.loadingRelatedItems = new Set();
       renderReviewControls();
       renderSuggestions();
     }
@@ -1106,20 +1139,28 @@ const APP_HTML = `<!doctype html>
         return;
       }
 
-      const visibleSuggestions = state.suggestions.filter((_, index) => !state.approved.has(index));
+      const visibleSuggestions = state.suggestions.filter((_, index) => !state.approved.has(index) && !state.rejected.has(index));
       if (visibleSuggestions.length === 0) {
         suggestionsEl.innerHTML = '<div class="empty">No suggestions left to review.</div>';
         return;
       }
 
       suggestionsEl.innerHTML = "";
+      const relatedItemIdsToLoad = new Set();
       state.suggestions.forEach((suggestion, index) => {
-        if (state.approved.has(index)) return;
+        if (state.approved.has(index) || state.rejected.has(index)) return;
         const card = document.createElement("div");
         card.className = "card";
         card.dataset.index = String(index);
         const fields = suggestion.suggested_fields || {};
+        const related = relatedExistingItemsFor(suggestion);
+        related.forEach((item) => {
+          if (!state.relatedItems[item.item_id] && !state.loadingRelatedItems.has(item.item_id)) {
+            relatedItemIdsToLoad.add(item.item_id);
+          }
+        });
         const disabled = state.rejected.has(index) || state.approved.has(index);
+        const approveLabel = related.length > 0 ? "Create new anyway" : "Approve";
 
         card.innerHTML = \`
           <div class="meta">
@@ -1165,23 +1206,170 @@ const APP_HTML = `<!doctype html>
               </select>
             </label>
           </div>
+          \${relatedExistingHtml(related)}
+          \${existingItemEditorHtml(index)}
           <div class="actions">
-            <button data-action="approve" \${disabled ? "disabled" : ""}>Approve</button>
-            <button class="danger" data-action="reject" \${disabled ? "disabled" : ""}>Reject</button>
+            <button data-action="approve" \${disabled ? "disabled" : ""}>\${approveLabel}</button>
+            <button class="danger" data-action="reject" \${disabled ? "disabled" : ""}>\${related.length > 0 ? "Discard" : "Reject"}</button>
             \${state.approved.has(index) ? '<span class="pill">saved</span>' : ""}
             \${state.rejected.has(index) ? '<span class="pill">rejected</span>' : ""}
           </div>
         \`;
 
         card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approveSuggestion(index, card));
+        card.querySelectorAll("[data-action='update-existing']").forEach((button) => {
+          button.addEventListener("click", () => openExistingItemEditor(index, button.dataset.itemId));
+        });
+        card.querySelector("[data-action='save-existing']")?.addEventListener("click", () => saveExistingItemInstead(index, card));
+        card.querySelector("[data-action='cancel-existing']")?.addEventListener("click", () => {
+          state.editingExistingForSuggestion = null;
+          renderSuggestions();
+        });
         card.querySelector('[data-action="reject"]')?.addEventListener("click", () => {
           state.rejected.add(index);
+          state.editingExistingForSuggestion = null;
           maybeMarkReviewComplete()
             .then(() => renderSuggestions())
             .catch((error) => showError(error.message));
         });
         suggestionsEl.appendChild(card);
       });
+
+      if (relatedItemIdsToLoad.size > 0) {
+        loadRelatedItems([...relatedItemIdsToLoad]);
+      }
+    }
+
+    function relatedExistingItemsFor(suggestion) {
+      return (suggestion.related_existing_items || [])
+        .slice()
+        .sort((left, right) => (right.confidence || 0) - (left.confidence || 0))
+        .slice(0, 3);
+    }
+
+    function relatedExistingHtml(related) {
+      if (related.length === 0) return "";
+
+      return '<div class="card">' +
+        '<div class="row-title">Looks related to existing item</div>' +
+        related.map((item) => {
+          const existingItem = state.relatedItems[item.item_id];
+          const itemTitle = existingItem?.title || "Loading existing item...";
+          return (
+          '<div class="source">' +
+            '<strong>' + escapeHtml(itemTitle) + '</strong> · ' +
+            escapeHtml(item.relationship) + ' · confidence ' + escapeHtml(String(item.confidence ?? "")) +
+            '<br />' + escapeHtml(item.reason || "") +
+            '<div class="actions">' +
+              '<button class="secondary" data-action="update-existing" data-item-id="' + escapeAttr(item.item_id) + '">Update existing instead</button>' +
+            '</div>' +
+          '</div>'
+          );
+        }).join("") +
+      '</div>';
+    }
+
+    async function loadRelatedItems(itemIds) {
+      const uniqueIds = itemIds.filter((id) => id && !state.relatedItems[id] && !state.loadingRelatedItems.has(id));
+      if (uniqueIds.length === 0) return;
+
+      uniqueIds.forEach((id) => state.loadingRelatedItems.add(id));
+      try {
+        const items = await Promise.all(uniqueIds.map((id) =>
+          requestJson("/api/items/" + encodeURIComponent(id)).catch(() => null)
+        ));
+        let changed = false;
+        items.forEach((item) => {
+          if (!item?.id) return;
+          state.relatedItems[item.id] = item;
+          changed = true;
+        });
+        if (changed) renderSuggestions();
+      } finally {
+        uniqueIds.forEach((id) => state.loadingRelatedItems.delete(id));
+      }
+    }
+
+    function existingItemEditorHtml(index) {
+      const edit = state.editingExistingForSuggestion;
+      if (!edit || edit.suggestionIndex !== index || !edit.item) return "";
+
+      const item = edit.item;
+      return '<div class="card">' +
+        '<div class="row-title">Update existing item manually</div>' +
+        '<div class="source">No new item will be created. Use the suggestion/raw dump as reference and edit the existing item yourself.</div>' +
+        '<div class="grid">' +
+          '<label>Type<select data-existing-field="type">' + itemTypeOptions(item.type) + '</select></label>' +
+          '<label>Status<input data-existing-field="status" value="' + escapeAttr(item.status || "") + '" /></label>' +
+        '</div>' +
+        '<label>Title<input data-existing-field="title" value="' + escapeAttr(item.title || "") + '" /></label>' +
+        '<label>Description<textarea data-existing-field="description">' + escapeHtml(item.description || "") + '</textarea></label>' +
+        '<div class="grid">' +
+          '<label>Due date<input data-existing-field="due_date" value="' + escapeAttr(item.fields?.due_date || "") + '" /></label>' +
+          '<label>Follow-up date<input data-existing-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
+          '<label>Waiting on<input data-existing-field="waiting_on" value="' + escapeAttr(item.fields?.waiting_on || "") + '" /></label>' +
+          '<label>Category<input data-existing-field="category" value="' + escapeAttr(item.fields?.category || "") + '" /></label>' +
+        '</div>' +
+        '<div class="actions">' +
+          '<button data-action="save-existing">Save existing item</button>' +
+          '<button class="secondary" data-action="cancel-existing">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    async function openExistingItemEditor(index, itemId) {
+      clearError();
+      setBusy("Loading existing item...");
+      try {
+        const item = await requestJson("/api/items/" + encodeURIComponent(itemId));
+        if (item?.id) state.relatedItems[item.id] = item;
+        state.editingExistingForSuggestion = { suggestionIndex: index, item };
+        renderSuggestions();
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    async function saveExistingItemInstead(index, card) {
+      const edit = state.editingExistingForSuggestion;
+      if (!edit || edit.suggestionIndex !== index || !edit.item) return;
+
+      clearError();
+      setBusy("Updating existing item...");
+      try {
+        await requestJson("/api/items/" + encodeURIComponent(edit.item.id), {
+          method: "PATCH",
+          body: readExistingItemPatch(card),
+        });
+        state.rejected.add(index);
+        state.editingExistingForSuggestion = null;
+        await loadItems();
+        await maybeMarkReviewComplete();
+        renderSuggestions();
+        setStatus("Updated existing item.");
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    function readExistingItemPatch(card) {
+      const value = (field) => card.querySelector('[data-existing-field="' + field + '"]')?.value?.trim() || "";
+      return {
+        type: value("type") || undefined,
+        title: value("title") || undefined,
+        description: value("description") || "",
+        status: value("status") || undefined,
+        fields: {
+          due_date: value("due_date") || null,
+          follow_up_date: value("follow_up_date") || null,
+          waiting_on: value("waiting_on") || null,
+          category: value("category") || null,
+        },
+      };
     }
 
     async function approveSuggestion(index, card) {
@@ -1295,6 +1483,7 @@ const APP_HTML = `<!doctype html>
         const card = document.createElement("div");
         card.className = "card" + (item.archived_at ? " archived" : "");
         const sourceMemo = item.source?.raw_text || "";
+        const isEditing = state.editingItemId === item.id;
         card.innerHTML = \`
           <div class="row-head">
             <div>
@@ -1305,18 +1494,79 @@ const APP_HTML = `<!doctype html>
           </div>
           \${item.description ? '<div>' + escapeHtml(item.description) + '</div>' : ""}
           \${sourceMemo ? '<div class="source">Source memo: ' + escapeHtml(sourceMemo) + '</div>' : ""}
+          \${isEditing ? ledgerItemEditorHtml(item) : ""}
           <div class="actions">
             <select data-item-status>
               \${statusOptions(item.status)}
             </select>
             <button class="secondary" data-action="status">Update Status</button>
+            <button class="secondary" data-action="edit">\${isEditing ? "Close edit" : "Edit"}</button>
             <button class="danger" data-action="archive">Archive</button>
           </div>
         \`;
         card.querySelector('[data-action="status"]').addEventListener("click", () => updateItemStatus(item.id, card));
+        card.querySelector('[data-action="edit"]').addEventListener("click", () => {
+          state.editingItemId = state.editingItemId === item.id ? null : item.id;
+          renderItems();
+        });
+        card.querySelector('[data-action="save-edit"]')?.addEventListener("click", () => saveLedgerItemEdit(item.id, card));
+        card.querySelector('[data-action="cancel-edit"]')?.addEventListener("click", () => {
+          state.editingItemId = null;
+          renderItems();
+        });
         card.querySelector('[data-action="archive"]').addEventListener("click", () => archiveItem(item.id));
         itemsEl.appendChild(card);
       });
+    }
+
+    function ledgerItemEditorHtml(item) {
+      return '<div class="card">' +
+        '<div class="row-title">Edit item</div>' +
+        '<div class="grid">' +
+          '<label>Type<select data-ledger-field="type">' + itemTypeOptions(item.type) + '</select></label>' +
+          '<label>Status<input data-ledger-field="status" value="' + escapeAttr(item.status || "") + '" /></label>' +
+        '</div>' +
+        '<label>Title<input data-ledger-field="title" value="' + escapeAttr(item.title || "") + '" /></label>' +
+        '<label>Description<textarea data-ledger-field="description">' + escapeHtml(item.description || "") + '</textarea></label>' +
+        '<div class="grid">' +
+          '<label>Due date<input data-ledger-field="due_date" value="' + escapeAttr(item.fields?.due_date || "") + '" /></label>' +
+          '<label>Follow-up date<input data-ledger-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
+        '</div>' +
+        '<div class="actions">' +
+          '<button data-action="save-edit">Save edit</button>' +
+          '<button class="secondary" data-action="cancel-edit">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    async function saveLedgerItemEdit(id, card) {
+      clearError();
+      setBusy("Saving item edit...");
+      try {
+        await requestJson("/api/items/" + encodeURIComponent(id), {
+          method: "PATCH",
+          body: readLedgerItemPatch(card),
+        });
+        state.editingItemId = null;
+        await loadItems();
+        setStatus("Updated item.");
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    function readLedgerItemPatch(card) {
+      const value = (field) => card.querySelector('[data-ledger-field="' + field + '"]')?.value?.trim() || "";
+      return {
+        type: value("type") || undefined,
+        title: value("title") || undefined,
+        description: value("description") || "",
+        status: value("status") || undefined,
+        due_date: value("due_date") || null,
+        follow_up_date: value("follow_up_date") || null,
+      };
     }
 
     async function updateItemStatus(id, card) {
@@ -1373,6 +1623,7 @@ const APP_HTML = `<!doctype html>
       $("addMemoryBtn").disabled = Boolean(message);
       $("parser").disabled = Boolean(options.disableGenerationSettings);
       $("useMemory").disabled = Boolean(options.disableGenerationSettings);
+      $("useContext").disabled = Boolean(options.disableGenerationSettings);
       $("generationSettings").classList.toggle("disabled", Boolean(options.disableGenerationSettings));
     }
 
@@ -1392,6 +1643,12 @@ const APP_HTML = `<!doctype html>
 
     function typeOptions(current) {
       return ["task", "exploration", "idea", "reference", "clarify_needed"].map((type) =>
+        '<option value="' + type + '" ' + (type === current ? "selected" : "") + '>' + type + '</option>'
+      ).join("");
+    }
+
+    function itemTypeOptions(current) {
+      return ["task", "exploration", "idea", "reference"].map((type) =>
         '<option value="' + type + '" ' + (type === current ? "selected" : "") + '>' + type + '</option>'
       ).join("");
     }

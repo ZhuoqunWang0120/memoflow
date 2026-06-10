@@ -1082,3 +1082,219 @@ Covered:
   `clarify_needed` is not directly persistable as an Item, but the web UI should
   show a friendlier message and guide the user to edit the type/title/status
   before approving.
+
+## Context-Aware Suggestion Generation
+
+Implemented on 2026-06-10.
+
+Goal:
+
+```text
+raw dump
+-> optional lightweight context
+-> suggestions with advisory related_existing_items
+-> user chooses create new / manually update existing / discard
+```
+
+Added:
+
+- `src/services/suggestionContextService.ts`
+- `src/eval/runContextEval.ts`
+- `related_existing_items` on `Suggestion`
+- `useContext` request flag for `POST /api/suggestions`
+
+Context sources:
+
+- active, non-archived memory entries, capped at 20 most recently updated
+- recent active items, capped at 20 most recently updated
+- deterministic keyword-matched existing items, capped at 5 and deduped against
+  recent active items
+- semantic scan items, capped at 100 active items, ordered as:
+  1. keyword-matched items
+  2. recent active items
+  3. older active items by `updated_at` descending, falling back to `created_at`
+
+Active item definition:
+
+- not archived
+- status is not `done`
+- status is not `archived`
+
+Product decisions:
+
+- `useMemory` remains memory-only behavior.
+- `useContext` includes active memory plus existing item context.
+- Context is optional and off unless selected in the UI/API request.
+- Existing item context is advisory only.
+- Semantic duplicate detection is a dedicated LLM scan pass when `useContext` is
+  enabled with the LLM parser. It compares the raw dump against compact
+  `semanticScanItems` and returns only advisory `related_existing_items`.
+- The semantic scan prompt includes targeted few-shot examples for:
+  - Chinese/English translation and aliases, e.g. `星露谷mod` vs Stardew Valley
+  - semantic specificity, e.g. `Safeway pick up lexapro` vs `Pick up medicine`
+  - topic/plural variation, e.g. `LinkedIn jobs` vs LinkedIn/job items
+- The LLM may mark a suggestion with:
+  - `possible_duplicate`
+  - `follow_up`
+  - `same_topic`
+- Related item IDs are filtered after parsing. IDs not present in prompt context
+  are ignored before returning suggestions.
+- Semantic scan relations are merged into generated suggestions only when the
+  dump produces exactly one suggestion. Multi-suggestion dumps skip automatic
+  relation attachment to avoid assigning one relation to the wrong suggestion.
+- Strong deterministic keyword matches can add a fallback `possible_duplicate`
+  relation when the model omits one. Current fallback requires at least two
+  overlapping meaningful terms and at least 50% raw-token overlap.
+- Keyword-matched items are shown in the keyword section first and excluded from
+  the recent-items section so the strongest duplicate candidates are prominent.
+- User can still create a new item anyway.
+- User can choose `Update existing instead`, manually edit the existing item,
+  and save it without creating a new item.
+- User can discard the suggestion without creating or updating anything.
+- Related-item UI shows existing item titles, not raw IDs.
+- Discarded suggestion cards disappear from the review list immediately.
+
+## Manual Item Editing
+
+Implemented on 2026-06-10.
+
+Goal:
+
+```text
+existing item
+-> user opens manual edit form
+-> user edits canonical fields
+-> file-backed item is updated with a new updated_at
+```
+
+Added:
+
+- `PATCH /api/items/:id`
+- shared `UpdateItemRequestSchema` and request mapper in
+  `src/services/itemUpdatePatch.ts`
+- inline `Edit` action in the Item Ledger
+- reused manual existing-item editor for `Update existing instead`
+
+Editable fields:
+
+- `title`
+- `description`
+- `type`
+- `status`
+- `fields.due_date`
+- `fields.follow_up_date`
+
+Product decisions:
+
+- Editing is deterministic and user-controlled.
+- LLMs do not rewrite, merge, or update existing item fields.
+- Item IDs and `created_at` are never updated by the edit path.
+- `archived_at` remains controlled by archive behavior, not the public PATCH
+  payload.
+- String fields are trimmed where appropriate.
+- Empty required title/status values are rejected.
+- The edit form is prefilled from the current item.
+- Canceling edit only closes the form and does not mutate storage.
+- Saving an edit refreshes the ledger and persists to `data/items.jsonl`.
+- `Update existing instead` opens a prefilled manual editor and, after saving,
+  resolves the suggestion without creating a new item.
+
+Verification:
+
+```bash
+npm run eval:items
+```
+
+Covered:
+
+- allowed field updates
+- omitted field preservation
+- `updated_at` changes
+- missing item ID rejection
+- invalid type rejection
+- empty title/status rejection
+- immutable `id` and `created_at`
+- PATCH request payload validation and flat date mapping
+- archive behavior still sets `archived_at`
+- existing deterministic sort/filter/search behavior
+
+Non-goals preserved:
+
+- no auto-merge
+- no auto-update
+- no auto-archive
+- no embeddings
+- no vector search
+- no semantic retrieval/reranking
+- no project/group/tag hierarchy
+- no database migration
+
+Verification:
+
+```bash
+npm run eval:context
+```
+
+Covered:
+
+- active memory inclusion and cap
+- archived memory exclusion
+- recent active item inclusion and cap
+- done/archived item exclusion from recent active items
+- deterministic keyword matching
+- keyword dedupe against recent active items
+- deterministic duplicate fallback for short high-overlap dumps, including
+  `Memoflow try minimax api` vs `Use Minimax API In Memoflow`
+- prompt context sections and item IDs
+- related item schema parsing
+- invalid related item ID filtering
+
+### Dedup Troubleshooting Notes
+
+Observed failure:
+
+- After adding `semanticScanItems`, live checks for:
+  - `星露谷mod`
+  - `Safeway pick up lexapro`
+  - `LinkedIn jobs`
+  included the right candidates in prompt context, but the LLM still returned
+  normal suggestions without `related_existing_items`.
+
+Root cause:
+
+- Candidate retrieval and relation extraction were separate problems.
+- The first fix solved retrieval by making relevant active items visible to the
+  LLM, but relation extraction remained an optional side effect of a large
+  suggestion-generation prompt.
+- The generation prompt had many competing tasks: classification, title,
+  description, dates, fields, ambiguity handling, memory, and few-shot examples.
+  The model could satisfy the main task by creating a good suggestion and omit
+  the optional relation field.
+- The prompt also allowed omission when unsure, which made the model
+  conservative even when semantically related items were visible.
+- Deterministic fallback could not rescue these cases because it intentionally
+  only handles exact-token high-overlap duplicates.
+
+Fix:
+
+- Add a dedicated semantic relation scan pass with a small schema:
+  `related_existing_items` only.
+- Run it in parallel with normal suggestion generation for `parser=llm` when
+  context exists.
+- Keep all relation output advisory and still filter IDs against prompt context.
+- Preserve deterministic fallback for exact-token duplicates.
+
+Learning:
+
+- For LLM workflows, "the relevant context is present" is necessary but not
+  sufficient. If a behavior matters, make it the primary task in a small prompt
+  or provide a dedicated pass.
+- Few-shot examples are more effective in the dedicated scan prompt because the
+  model is not distracted by the broader suggestion-generation task.
+- Live behavioral checks are important. Static prompt inspection showed the
+  right candidates were visible, but only real runs showed the model still
+  skipped the optional relation field.
+- UI bugs can mask backend correctness. The relation flow also needed frontend
+  fixes: item detail fetches were being swallowed by the broader item list route,
+  so the existing-item editor opened with blank fields until route ordering was
+  corrected.

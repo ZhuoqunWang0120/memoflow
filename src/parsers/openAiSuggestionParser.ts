@@ -47,6 +47,23 @@ const suggestionResultJsonSchema = {
               },
             },
           },
+          related_existing_items: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                item_id: { type: "string" },
+                relationship: {
+                  type: "string",
+                  enum: ["possible_duplicate", "follow_up", "same_topic"],
+                },
+                reason: { type: "string" },
+                confidence: { type: "number", minimum: 0, maximum: 1 },
+              },
+              required: ["item_id", "relationship", "reason", "confidence"],
+            },
+          },
         },
         required: ["type", "title", "status", "confidence", "needs_clarification"],
       },
