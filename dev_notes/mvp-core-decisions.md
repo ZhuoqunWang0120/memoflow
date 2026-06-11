@@ -1502,3 +1502,64 @@ Browser verification:
 - Default generation settings changed: parser=llm, useMemory=on, useContext=on.
   The stub parser and no-context modes remain available but are no longer the
   default, since real usage should prefer the full pipeline.
+
+## Demo Strategy for First LinkedIn Post
+
+Implemented on 2026-06-10.
+
+### Decision: demo should emphasize task-state maintenance
+
+The first public demo should not show generic dump-to-task extraction.
+It should show MemoFlow's core differentiation: maintaining a trusted task
+ledger by detecting when a new thought relates to something already tracked.
+
+### Selected demo story
+
+```text
+Existing item:  Pick up medicine (task, ready)
+Memory:         Safeway is my usual pharmacy.
+Raw dump:       pick up ibuprofen at Safeway
+```
+
+Expected behavior:
+
+- MemoFlow generates a structured suggestion: "Pick up ibuprofen at Safeway".
+- It surfaces the related existing item "Pick up medicine" as a
+  possible_duplicate. The match is semantic (ibuprofen → medicine, not
+  exact-token), demonstrating context-aware interpretation.
+- The UI shows three human-in-the-loop choices:
+  - Create new anyway
+  - Update existing instead
+  - Discard
+- The demo clicks "Update existing instead" and opens the manual editor.
+
+### Demo data isolation
+
+Data is isolated in `data/demo/` via `MEMOFLOW_DATA_DIR` env var. All three
+store services (items, memory, dumps) respect this variable. Normal app
+behavior is completely unaffected.
+
+Added:
+- `MEMOFLOW_DATA_DIR` support in itemStoreService, memoryStoreService,
+  dumpStoreService
+- `scripts/demo-seed.mjs` — seeds sanitized demo data
+- `scripts/demo-record.mjs` — Playwright automated recording
+- `docs/demo-recording.md` — documentation
+
+### Recording approach
+
+- Playwright headless chromium, 1280×720
+- Suggestion API mocked via route interception (deterministic, no LLM cost)
+- Other APIs use real demo data
+- Output: `artifacts/demo/memoflow-demo.mp4` (~24s)
+- npm scripts: `npm run demo:record`, `npm run demo:seed`, `npm run demo:dev`
+
+### Intentional exclusions
+
+The demo intentionally avoids:
+- Real personal data
+- Prescription names (ibuprofen is OTC)
+- Health-sensitive details
+- Visa, school, or job-search examples
+- Full GitHub repo disclosure
+- Any hardcoded demo output in normal app behavior

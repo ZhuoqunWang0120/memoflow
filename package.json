@@ -13,7 +13,10 @@
     "eval:memory": "npm run build --silent && node dist/eval/runMemoryEval.js",
     "eval:context": "npm run build --silent && node dist/eval/runContextEval.js",
     "eval:capture": "npm run build --silent && node dist/eval/runCaptureEval.js",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "demo:seed": "node scripts/demo-seed.mjs",
+    "demo:record": "node scripts/demo-record.mjs",
+    "demo:dev": "MEMOFLOW_DATA_DIR=data/demo npm run dev"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
@@ -21,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "playwright": "^1.60.0",
     "typescript": "^5.5.3"
   }
 }
