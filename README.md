@@ -19,40 +19,123 @@ No database, auth, cloud sync, RAG, reminders, or import integrations yet.
 
 ```mermaid
 flowchart TD
-  A[Raw memo dump] --> B[Generate suggestions]
-  B --> C[Editable suggestion cards]
-  C --> D{User decision}
-  D -->|Approve| E[Save as Item]
-  D -->|Edit + approve| E
-  D -->|Reject| F[Discard suggestion]
-  E --> G[data/items.jsonl]
-  G --> H[Saved item list]
-  H --> I[Update status]
-  H --> J[Archive]
-  H --> K[Export CSV]
+  subgraph Capture["🎤 Capture View"]
+    A[Raw memo input] --> B{Submit}
+    B -->|Save now| C[Generate suggestions]
+    B -->|Dump for later| D[Save to pending queue]
+  end
+
+  subgraph Pending["📋 Pending View"]
+    D --> E[Pending dump list]
+    E --> F[Start review]
+  end
+
+  subgraph Review["🔍 Suggestion Review"]
+    C --> G[Editable suggestion cards]
+    F --> G
+    G --> H{User decision}
+    H -->|Approve| I[Save as Item]
+    H -->|Edit fields + approve| I
+    H -->|Update existing item| J[Edit existing item instead]
+    H -->|Reject| K[Discard suggestion]
+    J --> I
+  end
+
+  subgraph Items["📦 Items View"]
+    I --> L[data/items.jsonl]
+    L --> M[Item ledger — search / filter / sort]
+    M --> N[Update status / fields]
+    M --> O[Archive]
+    M --> P[Export CSV]
+    M --> Q[Edit item fields — title, description, URL, dates…]
+  end
+
+  subgraph Memory["🧠 Memory View"]
+    R[Create memory entry] --> S[data/memory.jsonl]
+    S --> T[Memory list — edit / archive]
+    T -->|Archive| U[Hidden from context]
+  end
+
+  Capture -. "use memory & context" .-> Review
+  Memory -. "active entries injected as context" .-> Review
 ```
 
 ## Architecture Flow
 
 ```mermaid
 flowchart LR
-  UI[Local webapp / CLI] --> API[Local API or CLI command]
-  API --> SuggestionService[suggestionService]
-  SuggestionService --> Parser{Parser}
-  Parser -->|stub| Stub[stubSuggestionParser]
-  Parser -->|llm| LLM[OpenAI parser]
+  subgraph Input["Input Layer"]
+    UI[Local Webapp<br/>4 sidebar views]
+    CLI[CLI commands]
+  end
+
+  subgraph API["API Layer"]
+    DumpsAPI["POST /api/dumps<br/>GET /api/dumps"]
+    SuggestAPI["POST /api/suggestions"]
+    ItemsAPI["POST /api/items<br/>GET/PATCH /api/items/:id<br/>POST /api/items/:id/archive"]
+    MemoryAPI["GET/POST/PATCH<br/>/api/memory"]
+  end
+
+  subgraph Core["Core Services"]
+    DumpStore[dumpStoreService<br/>data/dumps.jsonl]
+    SuggestionSvc[suggestionService]
+    ApprovalSvc[suggestionApprovalService]
+    ContextSvc[suggestionContextService]
+    ItemStore[itemStoreService<br/>data/items.jsonl]
+    MemoryStore[memoryStoreService<br/>data/memory.jsonl]
+  end
+
+  subgraph Parsing["Parsing Layer"]
+    Parser{parser?}
+    Stub[stub parser<br/>regex-based<br/>URL extraction]
+    LLM[LLM parser<br/>OpenAI API<br/>URL + context extraction]
+    SemanticScan[semanticRelationScan<br/>OpenAI API]
+  end
+
+  subgraph Context["Context Bundle"]
+    ActiveMem[Active memory entries]
+    KeywordItems[Keyword-matched items]
+    RecentItems[Recent active items]
+    SemanticItems[Semantic scan items<br/>≤100]
+  end
+
+  UI --> API
+  CLI --> API
+
+  DumpsAPI --> DumpStore
+  SuggestAPI --> SuggestionSvc
+  ItemsAPI --> ApprovalSvc
+  ItemsAPI --> ItemStore
+  MemoryAPI --> MemoryStore
+
+  DumpStore -->|"review"| SuggestAPI
+
+  SuggestionSvc --> Parser
+  Parser -->|stub| Stub
+  Parser -->|llm| LLM
+  LLM --> SemanticScan
+
   Stub --> SuggestionResult[SuggestionResult]
   LLM --> SuggestionResult
-  SuggestionResult --> Approval[suggestionApprovalService]
-  Approval --> ItemInput[AddItemInput]
-  ItemInput --> Store[itemStoreService]
-  Store --> Jsonl[(data/items.jsonl)]
-  Store --> Csv[CSV export]
+
+  ContextSvc --> Context
+  Context --> SuggestionSvc
+
+  MemoryStore --> ActiveMem
+  ItemStore --> KeywordItems
+  ItemStore --> RecentItems
+  ItemStore --> SemanticItems
+
+  SuggestionResult --> ApprovalSvc
+  ApprovalSvc -->|"merge suggested_fields<br/>+ user overrides"| ItemStore
+  ItemStore --> CsvExport[CSV export]
 
   Schemas[Zod schemas] -. validate .-> SuggestionResult
-  Schemas -. validate .-> ItemInput
-  Schemas -. validate .-> Store
+  Schemas -. validate .-> ApprovalSvc
+  Schemas -. validate .-> ItemStore
 ```
+
+Full-size combined system diagram and standalone files: [`docs/flowcharts.md`](docs/flowcharts.md).
 
 ## Setup
 
