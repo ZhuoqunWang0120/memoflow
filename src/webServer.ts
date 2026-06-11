@@ -1648,6 +1648,9 @@ const APP_HTML = `<!doctype html>
             <label>Category
               <input data-field="category" value="\${escapeAttr(fields.category || "")}" \${disabled ? "disabled" : ""} />
             </label>
+            <label>URL
+              <input data-field="url" value="\${escapeAttr(fields.url || "")}" \${disabled ? "disabled" : ""} />
+            </label>
             <label>Follow up
               <select data-field="follow_up_needed" \${disabled ? "disabled" : ""}>
                 <option value="" \${fields.follow_up_needed == null ? "selected" : ""}></option>
@@ -1759,6 +1762,7 @@ const APP_HTML = `<!doctype html>
           '<label>Follow-up date<input data-existing-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
           '<label>Waiting on<input data-existing-field="waiting_on" value="' + escapeAttr(item.fields?.waiting_on || "") + '" /></label>' +
           '<label>Category<input data-existing-field="category" value="' + escapeAttr(item.fields?.category || "") + '" /></label>' +
+          '<label>URL<input data-existing-field="url" value="' + escapeAttr(item.fields?.url || "") + '" /></label>' +
         '</div>' +
         '<div class="actions">' +
           '<button data-action="save-existing">Save existing item</button>' +
@@ -1818,6 +1822,7 @@ const APP_HTML = `<!doctype html>
           follow_up_date: value("follow_up_date") || null,
           waiting_on: value("waiting_on") || null,
           category: value("category") || null,
+          url: value("url") || null,
         },
       };
     }
@@ -1879,6 +1884,7 @@ const APP_HTML = `<!doctype html>
           waiting_on: value("waiting_on") || null,
           tags: tags ? tags.split(",").map((tag) => tag.trim()).filter(Boolean) : null,
           category: value("category") || null,
+          url: value("url") || null,
           follow_up_needed: followUp === "" ? null : followUp === "true",
         },
       };
@@ -1988,6 +1994,7 @@ const APP_HTML = `<!doctype html>
         '<div class="grid">' +
           '<label>Due date<input data-ledger-field="due_date" value="' + escapeAttr(item.fields?.due_date || "") + '" /></label>' +
           '<label>Follow-up date<input data-ledger-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
+          '<label>URL<input data-ledger-field="url" value="' + escapeAttr(item.fields?.url || "") + '" /></label>' +
         '</div>' +
         '<div class="actions">' +
           '<button data-action="save-edit">Save edit</button>' +
@@ -2023,6 +2030,9 @@ const APP_HTML = `<!doctype html>
         status: value("status") || undefined,
         due_date: value("due_date") || null,
         follow_up_date: value("follow_up_date") || null,
+        fields: {
+          url: value("url") || null,
+        },
       };
     }
 
