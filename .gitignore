@@ -7,6 +7,12 @@ dist/
 data/items.local.backup.jsonl
 data/dumps.jsonl
 data/items.jsonl
+data/memory.jsonl
+data/demo/
+artifacts/
+.claude/
+.playwright-mcp/
+ui/
 dev_notes/notes_parkinglot.md
 dev_notes/exisitng_item_edit_prompt.md
 dev_notes/realtime_dedup_prompt-0.md

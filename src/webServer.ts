@@ -273,64 +273,88 @@ const APP_HTML = `<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MemoFlow Local</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f7f4;
-      --ink: #20211f;
-      --muted: #686c63;
-      --line: #d9d8cf;
+      --bg: #f8f9ff;
+      --ink: #121c28;
+      --muted: #424845;
+      --line: #E8EDEB;
       --panel: #ffffff;
-      --accent: #256f5b;
+      --accent: #4e6058;
       --accent-2: #334f8d;
-      --danger: #9f3535;
-      --shadow: 0 1px 2px rgba(30, 34, 31, 0.08);
+      --danger: #ba1a1a;
+      --danger-bg: #ffdad6;
+      --danger-text: #93000a;
+      --surface-low: #eef4ff;
+      --surface-mid: #e5eeff;
+      --shadow: 0px 4px 20px rgba(0, 0, 0, 0.04);
+      --radius-card: 12px;
+      --radius-btn: 8px;
+      --radius-input: 8px;
+      --radius-pill: 9999px;
+      --font-headline: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+      --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
     }
 
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; }
     body {
-      margin: 0;
       background: var(--bg);
       color: var(--ink);
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.45;
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.5;
     }
     main {
-      width: min(1180px, calc(100vw - 32px));
+      width: min(1200px, calc(100vw - 64px));
       margin: 0 auto;
-      padding: 24px 0 48px;
+      padding: 32px 0 64px;
     }
     header {
       display: flex;
       align-items: start;
       justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 18px;
+      gap: 20px;
+      margin-bottom: 32px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
     }
     h1 {
-      font-size: 24px;
-      margin: 0;
-      letter-spacing: 0;
+      font-family: var(--font-headline);
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--accent);
     }
     h2 {
-      font-size: 17px;
-      margin: 0 0 10px;
-      letter-spacing: 0;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      opacity: 0.7;
+      margin-bottom: 12px;
     }
     .muted {
       color: var(--muted);
       font-size: 13px;
+      opacity: 0.6;
     }
     .contact-block {
       display: grid;
       justify-items: end;
-      gap: 7px;
+      gap: 8px;
       max-width: 420px;
       text-align: right;
     }
     .contact-title {
       font-size: 13px;
       color: var(--muted);
+      opacity: 0.7;
     }
     .contact-actions {
       display: flex;
@@ -342,87 +366,113 @@ const APP_HTML = `<!doctype html>
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 34px;
-      min-width: 42px;
+      min-height: 36px;
+      min-width: 44px;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #fff;
+      border-radius: var(--radius-btn);
+      background: var(--panel);
       color: var(--accent-2);
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 600;
       text-decoration: none;
-      padding: 7px 10px;
+      padding: 8px 12px;
+      transition: background 0.15s ease, border-color 0.15s ease;
     }
     .icon-link:hover {
-      border-color: #aeb8d0;
-      background: #f9fafc;
+      border-color: var(--surface-mid);
+      background: var(--surface-low);
     }
     .workspace {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(360px, 0.9fr);
-      gap: 18px;
+      grid-template-columns: minmax(0, 1fr) minmax(380px, 0.9fr);
+      gap: 24px;
       align-items: start;
     }
     section {
       min-width: 0;
     }
     .band {
-      background: rgba(255,255,255,0.65);
-      border-top: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
-      padding: 14px 0;
-      margin-bottom: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
+    }
+    .band.dump-band {
+      background: var(--surface-low);
+      border-color: #dde8f0;
     }
     textarea, input, select {
       width: 100%;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #fff;
+      border-radius: var(--radius-input);
+      background: var(--panel);
       color: var(--ink);
-      font: inherit;
-      padding: 9px 10px;
+      font-family: var(--font-body);
+      font-size: 15px;
+      padding: 10px 12px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    textarea:focus, input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
     }
     textarea {
-      min-height: 130px;
+      min-height: 120px;
       resize: vertical;
     }
     label {
       display: grid;
-      gap: 5px;
+      gap: 4px;
       color: var(--muted);
       font-size: 12px;
       font-weight: 600;
+      letter-spacing: 0.02em;
     }
     button {
-      border: 1px solid transparent;
-      border-radius: 6px;
+      border: none;
+      border-radius: var(--radius-btn);
       background: var(--accent);
       color: #fff;
-      font: inherit;
-      font-weight: 650;
-      padding: 9px 12px;
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 10px 16px;
+      min-height: 40px;
       cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.1s ease;
     }
+    button:hover { opacity: 0.88; }
+    button:active { transform: scale(0.98); }
     button.secondary {
-      background: #fff;
-      color: var(--accent-2);
-      border-color: var(--line);
+      background: var(--panel);
+      color: var(--accent);
+      border: 1px solid var(--line);
+    }
+    button.secondary:hover {
+      background: var(--surface-low);
     }
     button.danger {
-      background: #fff;
+      background: var(--panel);
       color: var(--danger);
-      border-color: #e1c4c4;
+      border: 1px solid var(--danger-bg);
+    }
+    button.danger:hover {
+      background: var(--danger-bg);
     }
     button:disabled {
-      opacity: 0.55;
+      opacity: 0.4;
       cursor: not-allowed;
+      transform: none;
     }
     .controls {
       display: flex;
       gap: 10px;
       align-items: center;
       flex-wrap: wrap;
-      margin-top: 10px;
+      margin-top: 12px;
     }
     .parser {
       width: 120px;
@@ -434,39 +484,40 @@ const APP_HTML = `<!doctype html>
       flex-wrap: wrap;
     }
     .generation-settings.disabled {
-      opacity: 0.55;
+      opacity: 0.4;
     }
     .checkbox-row {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
+      gap: 6px;
       color: var(--muted);
       font-size: 13px;
-      font-weight: 650;
+      font-weight: 500;
     }
     .checkbox-row input {
       width: auto;
       margin: 0;
     }
     .memory-input {
-      min-height: 74px;
+      min-height: 70px;
     }
     .memory-edit {
-      min-height: 82px;
+      min-height: 78px;
     }
     .stack {
       display: grid;
-      gap: 12px;
+      gap: 10px;
     }
     .card {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
+      border-radius: var(--radius-card);
+      padding: 18px;
       box-shadow: var(--shadow);
+      transition: box-shadow 0.25s ease;
     }
     .card.archived {
-      opacity: 0.62;
+      opacity: 0.55;
     }
     .grid {
       display: grid;
@@ -475,60 +526,82 @@ const APP_HTML = `<!doctype html>
     }
     .meta {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
       margin-bottom: 10px;
     }
     .pill {
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 3px 8px;
+      border: none;
+      border-radius: var(--radius-pill);
+      padding: 3px 10px;
       color: var(--muted);
-      font-size: 12px;
-      background: #fafaf8;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      background: var(--surface-mid);
+    }
+    .pill.status-active {
+      background: #d4e7dd;
+      color: #2d4a3e;
+    }
+    .pill.status-waiting {
+      background: #e5e0d4;
+      color: #5a4d2e;
+    }
+    .pill.status-done {
+      background: var(--surface-mid);
+      color: var(--muted);
+      opacity: 0.7;
     }
     .error {
       display: none;
-      border: 1px solid #e3b7b7;
-      background: #fff3f3;
-      color: #842323;
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 12px;
+      border: 1px solid var(--danger-bg);
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      border-radius: var(--radius-btn);
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      font-size: 14px;
       white-space: pre-wrap;
     }
     .empty {
       color: var(--muted);
       border: 1px dashed var(--line);
-      border-radius: 8px;
-      padding: 18px;
-      background: rgba(255,255,255,0.5);
+      border-radius: var(--radius-card);
+      padding: 24px;
+      background: var(--surface-low);
+      font-size: 14px;
+      opacity: 0.7;
     }
     .row-head {
       display: flex;
       justify-content: space-between;
       gap: 12px;
       align-items: start;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .row-title {
-      font-weight: 750;
+      font-weight: 600;
+      font-size: 15px;
       overflow-wrap: anywhere;
+      color: var(--ink);
     }
     .actions {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-      margin-top: 12px;
+      margin-top: 14px;
     }
     .source {
       font-size: 12px;
       color: var(--muted);
+      opacity: 0.6;
       margin-top: 8px;
       overflow-wrap: anywhere;
     }
-    @media (max-width: 860px) {
-      main { width: min(100vw - 20px, 720px); }
+    @media (max-width: 900px) {
+      main { width: min(100vw - 32px, 740px); padding: 24px 0 48px; }
       header { display: grid; }
       .contact-block {
         justify-items: start;
@@ -540,139 +613,479 @@ const APP_HTML = `<!doctype html>
       .workspace { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
     }
+    /* ===== Sidebar Layout ===== */
+    .app-layout {
+      display: flex;
+      min-height: 100vh;
+    }
+    .sidebar {
+      width: 220px;
+      min-width: 220px;
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      padding: 24px 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .sidebar-header {
+      padding: 0 20px 20px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 12px;
+    }
+    .sidebar-brand {
+      font-family: var(--font-headline);
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: -0.01em;
+    }
+    .sidebar-subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      opacity: 0.6;
+      margin-top: 4px;
+    }
+    .sidebar-nav {
+      list-style: none;
+      padding: 4px 12px;
+      margin: 0;
+      flex: 1;
+    }
+    .sidebar-nav li {
+      padding: 10px 12px;
+      border-radius: var(--radius-btn);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+      margin-bottom: 2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sidebar-nav li:hover {
+      background: var(--surface-low);
+      color: var(--ink);
+    }
+    .sidebar-nav li.active {
+      background: var(--surface-mid);
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .badge {
+      display: none;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--accent);
+      color: #fff;
+      border-radius: var(--radius-pill);
+      padding: 1px 7px;
+      min-width: 18px;
+      text-align: center;
+    }
+    .sidebar-footer {
+      padding: 16px 20px 0;
+      border-top: 1px solid var(--line);
+    }
+    .sidebar-link {
+      display: block;
+      font-size: 13px;
+      color: var(--accent-2);
+      text-decoration: none;
+      padding: 6px 0;
+    }
+    .sidebar-link:hover { text-decoration: underline; }
+    .sidebar-contact {
+      margin-top: 12px;
+    }
+    .sidebar-contact-text {
+      font-size: 11px;
+      color: var(--muted);
+      opacity: 0.6;
+      line-height: 1.4;
+    }
+    .sidebar-contact-links {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .sidebar-contact-links a {
+      font-size: 12px;
+      color: var(--accent-2);
+      text-decoration: none;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+    }
+    .sidebar-contact-links a:hover {
+      background: var(--surface-low);
+    }
+
+    /* ===== Main Content Override ===== */
+    main.main-content {
+      width: auto;
+      margin: 0;
+      padding: 32px 40px 64px;
+      max-width: none;
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* ===== View Switching ===== */
+    .view { display: none; }
+    .view.active { display: block; }
+
+    /* ===== Status Bar ===== */
+    .status-bar {
+      min-height: 20px;
+      margin-bottom: 8px;
+    }
+    .status-bar span {
+      font-size: 13px;
+      color: var(--muted);
+      opacity: 0.7;
+    }
+
+    /* ===== View Header ===== */
+    .view-header {
+      margin-bottom: 20px;
+    }
+    .view-title {
+      font-family: var(--font-headline);
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+
+    /* ===== Capture Area (warm post-it feel) ===== */
+    .capture-area {
+      background: #fef9ef;
+      border: 1px solid #f0e8d4;
+      border-radius: var(--radius-card);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .capture-label {
+      font-family: var(--font-headline);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      opacity: 0.7;
+      margin-bottom: 10px;
+    }
+
+    /* ===== Filter Bar ===== */
+    .filter-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .filter-search {
+      width: 200px;
+      min-width: 140px;
+    }
+    .filter-select {
+      width: auto;
+      min-width: 100px;
+    }
+
+    /* ===== Memory Input Area ===== */
+    .memory-input-area {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    /* ===== Compact Rows ===== */
+    .compact-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      gap: 10px;
+      transition: background 0.15s ease;
+    }
+    .compact-row:last-child {
+      border-bottom: none;
+    }
+    .compact-row:hover {
+      background: var(--surface-low);
+    }
+    .compact-row.archived {
+      opacity: 0.5;
+    }
+    .compact-row-main {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+    .compact-row-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      color: var(--ink);
+    }
+    .compact-row-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+      font-size: 14px;
+      color: var(--ink);
+    }
+    .compact-row-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .compact-row-date {
+      font-size: 12px;
+      color: var(--muted);
+      opacity: 0.6;
+    }
+    .compact-row-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+      opacity: 0.5;
+      transition: opacity 0.15s ease;
+    }
+    .compact-row:hover .compact-row-actions {
+      opacity: 1;
+    }
+    .compact-row-editor {
+      width: 100%;
+      padding: 12px 0 4px 0;
+    }
+    .compact-row-editor .card {
+      margin-top: 8px;
+    }
+    .compact-row-editor-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .review-setup-panel {
+      width: 100%;
+      padding: 12px 0 4px 0;
+    }
+    .review-setup-panel .card {
+      margin-top: 8px;
+    }
+
+    /* ===== Type Chip ===== */
+    .type-chip {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--surface-mid);
+      border-radius: var(--radius-pill);
+      padding: 2px 8px;
+      flex-shrink: 0;
+    }
+
+    /* ===== Subtle Button (replaces danger) ===== */
+    button.subtle-btn, .subtle-btn {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-btn);
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+      min-height: unset;
+    }
+    button.subtle-btn:hover, .subtle-btn:hover {
+      background: var(--surface-low);
+      color: var(--ink);
+    }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 900px) {
+      .app-layout { flex-direction: column; }
+      .sidebar {
+        width: 100%;
+        min-width: unset;
+        height: auto;
+        position: relative;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        padding: 12px 16px;
+        gap: 12px;
+      }
+      .sidebar-header {
+        padding: 0;
+        border-bottom: none;
+        margin-bottom: 0;
+      }
+      .sidebar-nav {
+        display: flex;
+        gap: 4px;
+        padding: 0;
+        flex: unset;
+      }
+      .sidebar-footer { display: none; }
+      main.main-content {
+        padding: 20px 16px 48px;
+      }
+      .filter-bar { flex-direction: column; align-items: stretch; }
+      .filter-search { width: 100%; }
+      .filter-select { width: 100%; }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <h1>MemoFlow Local</h1>
-        <div class="muted">Local file store: data/items.jsonl</div>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-brand">MemoFlow</div>
+        <div class="sidebar-subtitle">Local file store</div>
       </div>
-      <aside class="contact-block" aria-label="Carol Wang contact">
-        <div class="contact-title">Hey, this is Carol. I'm open to work: AI Eng, MLE, alternative data.</div>
-        <div class="contact-actions">
-          <a class="icon-link" href="mailto:zhuoqun.wang0120@gmail.com" aria-label="Email Carol Wang" title="Email Carol Wang">@</a>
-          <a class="icon-link" href="${CV_ROUTE}" target="_blank" rel="noreferrer" aria-label="Open Carol Wang CV" title="Open Carol Wang CV">CV</a>
-        </div>
-      </aside>
-    </header>
-
-    <div id="error" class="error"></div>
-
-    <div class="band">
-      <section>
-        <h2>Raw Memo</h2>
-        <textarea id="rawText"></textarea>
-        <div class="controls">
-          <button id="saveLaterBtn" class="secondary">Save for later</button>
-          <div id="generationSettings" class="generation-settings">
-            <select id="parser" class="parser" aria-label="Parser">
-              <option value="stub">stub</option>
-              <option value="llm">llm</option>
-            </select>
-            <label class="checkbox-row">
-              <input id="useMemory" type="checkbox" />
-              Use memory
-            </label>
-            <label class="checkbox-row">
-              <input id="useContext" type="checkbox" />
-              Use context
-            </label>
-            <button id="generateBtn">Generate suggestions now</button>
+      <ul class="sidebar-nav">
+        <li class="active" data-view="capture">Capture</li>
+        <li data-view="items">Items</li>
+        <li data-view="memory">Memory</li>
+        <li data-view="pending">Pending <span class="badge" id="pendingBadge"></span></li>
+      </ul>
+      <div class="sidebar-footer">
+        <a href="/capture" class="sidebar-link">Open Capture ↗</a>
+        <div class="sidebar-contact">
+          <div class="sidebar-contact-text">Carol · open to work: AI Eng, MLE, alt data</div>
+          <div class="sidebar-contact-links">
+            <a href="mailto:zhuoqun.wang0120@gmail.com">@</a>
+            <a href="${CV_ROUTE}" target="_blank" rel="noreferrer">CV</a>
           </div>
-          <span id="status" class="muted"></span>
-        </div>
-      </section>
-    </div>
-
-    <section class="band">
-      <h2>Memory</h2>
-      <div class="card">
-        <label>Add memory
-          <textarea id="memoryText" class="memory-input" placeholder="Kiersten is my Duke DSO contact for STEM OPT questions."></textarea>
-        </label>
-        <div class="controls">
-          <button id="addMemoryBtn" class="secondary">+ Add Memory</button>
-          <label class="checkbox-row">
-            <input id="showArchivedMemory" type="checkbox" />
-            Show archived
-          </label>
         </div>
       </div>
-      <div id="memoryList" class="stack"></div>
-    </section>
+    </nav>
+    <main class="main-content">
+      <div id="error" class="error"></div>
+      <div class="status-bar"><span id="status"></span></div>
 
-    <section class="band">
-      <h2>Pending Review</h2>
-      <div id="pendingDumps" class="stack"></div>
-    </section>
-
-    <div class="workspace">
-      <section>
-        <h2>Suggestions</h2>
+      <div id="view-capture" class="view active">
+        <div class="capture-area">
+          <div class="capture-label">Quick Capture</div>
+          <textarea id="rawText" placeholder="Dump a thought, idea, or reminder..."></textarea>
+          <div class="controls">
+            <button id="saveLaterBtn" class="secondary">Save for later</button>
+            <div id="generationSettings" class="generation-settings">
+              <select id="parser" class="parser" aria-label="Parser">
+                <option value="llm">llm</option>
+                <option value="stub">stub</option>
+              </select>
+              <label class="checkbox-row">
+                <input id="useMemory" type="checkbox" checked />
+                Use memory
+              </label>
+              <label class="checkbox-row">
+                <input id="useContext" type="checkbox" checked />
+                Use context
+              </label>
+              <button id="generateBtn">Generate suggestions now</button>
+            </div>
+          </div>
+        </div>
         <div id="reviewControls"></div>
         <div id="suggestions" class="stack">
           <div class="empty">Generate suggestions from a memo dump, then approve, edit, or reject each card.</div>
         </div>
-      </section>
+      </div>
 
-      <section>
-        <h2>Saved Items</h2>
-        <div class="card">
-          <div class="grid">
-            <label>Search
-              <input id="itemSearch" placeholder="Title, description, source memo" />
-            </label>
-            <label>Sort
-              <select id="itemSort">
-                <option value="updated_at_desc">Updated newest first</option>
-                <option value="updated_at_asc">Updated oldest first</option>
-                <option value="created_at_desc">Created newest first</option>
-                <option value="created_at_asc">Created oldest first</option>
-                <option value="due_date_asc">Due date soonest first</option>
-                <option value="follow_up_date_asc">Follow-up date soonest first</option>
-                <option value="type_asc">Type</option>
-                <option value="status_asc">Status</option>
-              </select>
-            </label>
-            <label>Type
-              <select id="itemTypeFilter">
-                <option value="">All types</option>
-                <option value="task">task</option>
-                <option value="exploration">exploration</option>
-                <option value="idea">idea</option>
-                <option value="reference">reference</option>
-              </select>
-            </label>
-            <label>Status
-              <select id="itemStatusFilter">
-                <option value="">All statuses</option>
-                <option value="ready">ready</option>
-                <option value="open">open</option>
-                <option value="saved">saved</option>
-                <option value="waiting">waiting</option>
-                <option value="in_progress">in_progress</option>
-                <option value="done">done</option>
-                <option value="archived">archived</option>
-              </select>
-            </label>
-            <label>Archived
-              <select id="itemArchivedFilter">
-                <option value="hide">Hide archived</option>
-                <option value="show">Show archived</option>
-                <option value="only">Archived only</option>
-              </select>
-            </label>
-          </div>
-          <div class="controls">
-            <button id="clearItemFiltersBtn" class="secondary">Clear filters</button>
-          </div>
+      <div id="view-items" class="view">
+        <div class="view-header">
+          <h2 class="view-title">Saved Items</h2>
+        </div>
+        <div class="filter-bar">
+          <input id="itemSearch" placeholder="Search..." class="filter-search" />
+          <select id="itemSort" class="filter-select">
+            <option value="updated_at_desc">Updated newest</option>
+            <option value="updated_at_asc">Updated oldest</option>
+            <option value="created_at_desc">Created newest</option>
+            <option value="created_at_asc">Created oldest</option>
+            <option value="due_date_asc">Due soonest</option>
+            <option value="follow_up_date_asc">Follow-up soonest</option>
+            <option value="type_asc">Type</option>
+            <option value="status_asc">Status</option>
+          </select>
+          <select id="itemTypeFilter" class="filter-select">
+            <option value="">All types</option>
+            <option value="task">task</option>
+            <option value="exploration">exploration</option>
+            <option value="idea">idea</option>
+            <option value="reference">reference</option>
+          </select>
+          <select id="itemStatusFilter" class="filter-select">
+            <option value="">All statuses</option>
+            <option value="ready">ready</option>
+            <option value="open">open</option>
+            <option value="saved">saved</option>
+            <option value="waiting">waiting</option>
+            <option value="in_progress">in_progress</option>
+            <option value="done">done</option>
+            <option value="archived">archived</option>
+          </select>
+          <select id="itemArchivedFilter" class="filter-select">
+            <option value="hide">Hide archived</option>
+            <option value="show">Show archived</option>
+            <option value="only">Archived only</option>
+          </select>
+          <button id="clearItemFiltersBtn" class="subtle-btn">Clear</button>
         </div>
         <div id="items" class="stack"></div>
-      </section>
-    </div>
-  </main>
+      </div>
+
+      <div id="view-memory" class="view">
+        <div class="view-header">
+          <h2 class="view-title">Memory</h2>
+        </div>
+        <div class="memory-input-area">
+          <textarea id="memoryText" class="memory-input" placeholder="Add a memory..."></textarea>
+          <div class="controls">
+            <button id="addMemoryBtn" class="secondary">+ Add Memory</button>
+            <label class="checkbox-row">
+              <input id="showArchivedMemory" type="checkbox" />
+              Show archived
+            </label>
+          </div>
+        </div>
+        <div id="memoryList" class="stack"></div>
+      </div>
+
+      <div id="view-pending" class="view">
+        <div class="view-header">
+          <h2 class="view-title">Pending Review</h2>
+        </div>
+        <div id="pendingDumps" class="stack"></div>
+      </div>
+    </main>
+  </div>
 
   <script>
     const state = {
@@ -690,6 +1103,8 @@ const APP_HTML = `<!doctype html>
       relatedItems: {},
       loadingRelatedItems: new Set(),
       editingItemId: null,
+      currentView: "capture",
+      editingMemoryId: null,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -722,6 +1137,12 @@ const APP_HTML = `<!doctype html>
     loadItems();
     loadPendingDumps();
     loadMemory();
+
+    document.querySelectorAll(".sidebar-nav li").forEach((li) => {
+      li.addEventListener("click", () => {
+        if (li.dataset.view) switchView(li.dataset.view);
+      });
+    });
 
     async function saveDumpForLater() {
       clearError();
@@ -806,6 +1227,7 @@ const APP_HTML = `<!doctype html>
         const result = await requestJson("/api/items" + itemQueryString());
         state.items = result.items || [];
         renderItems();
+        updateSidebarBadges();
       } catch (error) {
         showError(error.message);
       }
@@ -854,28 +1276,40 @@ const APP_HTML = `<!doctype html>
 
       memoryListEl.innerHTML = "";
       state.memory.forEach((entry) => {
-        const card = document.createElement("div");
-        card.className = "card" + (entry.archived_at ? " archived" : "");
-        card.innerHTML = \`
-          <div class="row-head">
-            <div>
-              <div class="muted">\${escapeHtml(entry.id)} · updated \${escapeHtml(entry.updated_at)}</div>
+        const wrap = document.createElement("div");
+        wrap.className = "compact-row" + (entry.archived_at ? " archived" : "");
+        const isEditing = state.editingMemoryId === entry.id;
+        const truncatedText = entry.text.length > 80 ? entry.text.substring(0, 80) + "..." : entry.text;
+        wrap.innerHTML = \`
+          <div class="compact-row-main">
+            <span class="compact-row-text">\${escapeHtml(truncatedText)}</span>
+            <span class="compact-row-meta">
+              \${entry.archived_at ? '<span class="pill">archived</span>' : '<span class="pill status-active">active</span>'}
+              <span class="compact-row-date">\${escapeHtml(formatDate(entry.updated_at))}</span>
+            </span>
+            <div class="compact-row-actions">
+              <button class="subtle-btn" data-action="edit">\${isEditing ? "Close" : "Edit"}</button>
+              <button class="subtle-btn" data-action="archive" \${entry.archived_at ? "disabled" : ""}>Archive</button>
             </div>
-            \${entry.archived_at ? '<span class="pill">archived</span>' : '<span class="pill">active</span>'}
           </div>
-          <label>Memory text
-            <textarea class="memory-edit" data-memory-text>\${escapeHtml(entry.text)}</textarea>
-          </label>
-          <div class="actions">
-            <button class="secondary" data-action="save">Save Edit</button>
-            <button class="secondary" data-action="archive" \${entry.archived_at ? "disabled" : ""}>Archive</button>
-            <button class="danger" data-action="delete">Delete</button>
-          </div>
+          \${isEditing ? \`
+            <div class="compact-row-editor">
+              <textarea class="memory-edit" data-memory-text>\${escapeHtml(entry.text)}</textarea>
+              <div class="compact-row-editor-actions">
+                <button class="secondary" data-action="save">Save</button>
+                <button class="subtle-btn" data-action="delete">Delete</button>
+              </div>
+            </div>
+          \` : ""}
         \`;
-        card.querySelector('[data-action="save"]').addEventListener("click", () => updateMemoryEntry(entry.id, card));
-        card.querySelector('[data-action="archive"]').addEventListener("click", () => archiveMemoryEntry(entry.id));
-        card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteMemoryEntry(entry.id));
-        memoryListEl.appendChild(card);
+        wrap.querySelector('[data-action="edit"]').addEventListener("click", () => {
+          state.editingMemoryId = state.editingMemoryId === entry.id ? null : entry.id;
+          renderMemory();
+        });
+        wrap.querySelector('[data-action="save"]')?.addEventListener("click", () => updateMemoryEntry(entry.id, wrap));
+        wrap.querySelector('[data-action="archive"]').addEventListener("click", () => archiveMemoryEntry(entry.id));
+        wrap.querySelector('[data-action="delete"]')?.addEventListener("click", () => deleteMemoryEntry(entry.id));
+        memoryListEl.appendChild(wrap);
       });
     }
 
@@ -962,63 +1396,68 @@ const APP_HTML = `<!doctype html>
     function renderPendingDumps() {
       if (state.pendingDumps.length === 0) {
         pendingDumpsEl.innerHTML = '<div class="empty">No pending dumps.</div>';
+        updateSidebarBadges();
         return;
       }
 
       pendingDumpsEl.innerHTML = "";
       state.pendingDumps.forEach((dump) => {
-        const card = document.createElement("div");
-        card.className = "card";
+        const wrap = document.createElement("div");
+        wrap.className = "compact-row";
         const expanded = state.reviewSetupDumpId === dump.id;
+        const truncatedText = dump.raw_text.length > 100 ? dump.raw_text.substring(0, 100) + "..." : dump.raw_text;
         const reviewSetupHtml = expanded
-          ? '<div class="card">' +
-              '<div class="row-title">Review with</div>' +
-              '<div class="controls">' +
-                '<select data-review-parser class="parser" aria-label="Review parser">' +
-                  '<option value="stub">stub</option>' +
-                  '<option value="llm">llm</option>' +
-                '</select>' +
-                '<label class="checkbox-row">' +
-                  '<input data-review-memory type="checkbox" />' +
-                  'Use memory' +
-                '</label>' +
-                '<label class="checkbox-row">' +
-                  '<input data-review-context type="checkbox" />' +
-                  'Use context' +
-                '</label>' +
-                '<button data-action="generate-review">Generate review</button>' +
-                '<button class="secondary" data-action="cancel-review-setup">Cancel</button>' +
+          ? '<div class="review-setup-panel">' +
+              '<div class="card">' +
+                '<div class="row-title">Review with</div>' +
+                '<div class="controls">' +
+                  '<select data-review-parser class="parser" aria-label="Review parser">' +
+                    '<option value="stub">stub</option>' +
+                    '<option value="llm">llm</option>' +
+                  '</select>' +
+                  '<label class="checkbox-row">' +
+                    '<input data-review-memory type="checkbox" />' +
+                    'Use memory' +
+                  '</label>' +
+                  '<label class="checkbox-row">' +
+                    '<input data-review-context type="checkbox" />' +
+                    'Use context' +
+                  '</label>' +
+                  '<button data-action="generate-review">Generate review</button>' +
+                  '<button class="secondary" data-action="cancel-review-setup">Cancel</button>' +
+                '</div>' +
               '</div>' +
             '</div>'
           : "";
-        card.innerHTML = \`
-          <div class="row-head">
-            <div>
-              <div class="row-title">\${escapeHtml(dump.raw_text)}</div>
-              <div class="muted">\${escapeHtml(dump.id)} · saved \${escapeHtml(dump.created_at)}</div>
+        wrap.innerHTML = \`
+          <div class="compact-row-main">
+            <span class="compact-row-text">\${escapeHtml(truncatedText)}</span>
+            <span class="compact-row-meta">
+              <span class="pill">\${escapeHtml(dump.status)}</span>
+              <span class="compact-row-date">\${escapeHtml(formatDate(dump.created_at))}</span>
+            </span>
+            <div class="compact-row-actions">
+              <button class="secondary" data-action="review">Review</button>
+              <button class="subtle-btn" data-action="ignore">Ignore</button>
             </div>
-            <span class="pill">\${escapeHtml(dump.status)}</span>
-          </div>
-          <div class="actions">
-            <button data-action="review">Review now</button>
-            <button class="danger" data-action="ignore">Ignore</button>
           </div>
           \${reviewSetupHtml}
         \`;
-        card.querySelector('[data-action="review"]').addEventListener("click", () => showPendingReviewSetup(dump.id));
-        card.querySelector('[data-action="ignore"]').addEventListener("click", () => ignorePendingDump(dump.id));
-        card.querySelector('[data-action="generate-review"]')?.addEventListener("click", () => {
-          const parser = card.querySelector("[data-review-parser]").value;
-          const useMemory = card.querySelector("[data-review-memory]").checked;
-          const useContext = card.querySelector("[data-review-context]").checked;
+        wrap.querySelector('[data-action="review"]').addEventListener("click", () => showPendingReviewSetup(dump.id));
+        wrap.querySelector('[data-action="ignore"]').addEventListener("click", () => ignorePendingDump(dump.id));
+        wrap.querySelector('[data-action="generate-review"]')?.addEventListener("click", () => {
+          const parser = wrap.querySelector("[data-review-parser]").value;
+          const useMemory = wrap.querySelector("[data-review-memory]").checked;
+          const useContext = wrap.querySelector("[data-review-context]").checked;
           startPendingDumpReview(dump, { parser, useMemory, useContext });
         });
-        card.querySelector('[data-action="cancel-review-setup"]')?.addEventListener("click", () => {
+        wrap.querySelector('[data-action="cancel-review-setup"]')?.addEventListener("click", () => {
           state.reviewSetupDumpId = null;
           renderPendingDumps();
         });
-        pendingDumpsEl.appendChild(card);
+        pendingDumpsEl.appendChild(wrap);
       });
+      updateSidebarBadges();
     }
 
     function showPendingReviewSetup(id) {
@@ -1039,6 +1478,7 @@ const APP_HTML = `<!doctype html>
         useMemory: settings.useMemory,
         useContext: settings.useContext,
       });
+      switchView("capture");
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -1075,6 +1515,7 @@ const APP_HTML = `<!doctype html>
         state.pendingDumps = [dump, ...state.pendingDumps];
       }
       renderPendingDumps();
+      switchView("pending");
       setStatus("Returned dump to pending review.");
     }
 
@@ -1097,7 +1538,10 @@ const APP_HTML = `<!doctype html>
       } finally {
         setBusy("");
       }
-      if (abandoned) setStatus("Abandoned pending dump.");
+      if (abandoned) {
+        setStatus("Abandoned pending dump.");
+        switchView("pending");
+      }
     }
 
     function clearCurrentReview() {
@@ -1203,6 +1647,9 @@ const APP_HTML = `<!doctype html>
             </label>
             <label>Category
               <input data-field="category" value="\${escapeAttr(fields.category || "")}" \${disabled ? "disabled" : ""} />
+            </label>
+            <label>URL
+              <input data-field="url" value="\${escapeAttr(fields.url || "")}" \${disabled ? "disabled" : ""} />
             </label>
             <label>Follow up
               <select data-field="follow_up_needed" \${disabled ? "disabled" : ""}>
@@ -1315,6 +1762,7 @@ const APP_HTML = `<!doctype html>
           '<label>Follow-up date<input data-existing-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
           '<label>Waiting on<input data-existing-field="waiting_on" value="' + escapeAttr(item.fields?.waiting_on || "") + '" /></label>' +
           '<label>Category<input data-existing-field="category" value="' + escapeAttr(item.fields?.category || "") + '" /></label>' +
+          '<label>URL<input data-existing-field="url" value="' + escapeAttr(item.fields?.url || "") + '" /></label>' +
         '</div>' +
         '<div class="actions">' +
           '<button data-action="save-existing">Save existing item</button>' +
@@ -1374,6 +1822,7 @@ const APP_HTML = `<!doctype html>
           follow_up_date: value("follow_up_date") || null,
           waiting_on: value("waiting_on") || null,
           category: value("category") || null,
+          url: value("url") || null,
         },
       };
     }
@@ -1435,20 +1884,33 @@ const APP_HTML = `<!doctype html>
           waiting_on: value("waiting_on") || null,
           tags: tags ? tags.split(",").map((tag) => tag.trim()).filter(Boolean) : null,
           category: value("category") || null,
+          url: value("url") || null,
           follow_up_needed: followUp === "" ? null : followUp === "true",
         },
       };
     }
 
     async function maybeMarkReviewComplete() {
-      if (!state.reviewingDumpId || state.suggestions.length === 0) return;
+      if (state.suggestions.length === 0) return;
 
       const complete = state.suggestions.every((_, index) =>
         state.approved.has(index) || state.rejected.has(index)
       );
       if (!complete) return;
 
-      await markCurrentDumpReviewed();
+      if (state.reviewingDumpId) {
+        await markCurrentDumpReviewed();
+      }
+      state.rawText = "";
+      $("rawText").value = "";
+      state.suggestions = [];
+      state.rejected = new Set();
+      state.approved = new Set();
+      state.editingExistingForSuggestion = null;
+      state.relatedItems = {};
+      state.loadingRelatedItems = new Set();
+      renderSuggestions();
+      renderReviewControls();
     }
 
     async function markCurrentDumpReviewed() {
@@ -1481,48 +1943,43 @@ const APP_HTML = `<!doctype html>
     function renderItems() {
       if (state.items.length === 0) {
         itemsEl.innerHTML = '<div class="empty">No saved items yet.</div>';
+        updateSidebarBadges();
         return;
       }
 
       itemsEl.innerHTML = "";
       state.items.forEach((item) => {
-        const card = document.createElement("div");
-        card.className = "card" + (item.archived_at ? " archived" : "");
-        const sourceMemo = item.source?.raw_text || "";
+        const wrap = document.createElement("div");
+        wrap.className = "compact-row" + (item.archived_at ? " archived" : "");
         const isEditing = state.editingItemId === item.id;
-        card.innerHTML = \`
-          <div class="row-head">
-            <div>
-              <div class="row-title">\${escapeHtml(item.title)}</div>
-              <div class="muted">\${escapeHtml(item.type)} · updated \${escapeHtml(item.updated_at)}</div>
+        wrap.innerHTML = \`
+          <div class="compact-row-main">
+            <span class="type-chip">\${escapeHtml(item.type)}</span>
+            <span class="compact-row-title">\${escapeHtml(item.title)}</span>
+            <span class="compact-row-meta">
+              <span class="pill \${statusPillClass(item.status)}">\${escapeHtml(displayItemStatus(item.status))}</span>
+              <span class="compact-row-date">\${escapeHtml(formatDate(item.updated_at))}</span>
+            </span>
+            <div class="compact-row-actions">
+              <button class="subtle-btn" data-action="edit">\${isEditing ? "Close" : "Edit"}</button>
+              <button class="subtle-btn" data-action="archive">Archive</button>
             </div>
-            <span class="pill">\${escapeHtml(displayItemStatus(item.status))}</span>
           </div>
-          \${item.description ? '<div>' + escapeHtml(item.description) + '</div>' : ""}
-          \${sourceMemo ? '<div class="source">Source memo: ' + escapeHtml(sourceMemo) + '</div>' : ""}
-          \${isEditing ? ledgerItemEditorHtml(item) : ""}
-          <div class="actions">
-            <select data-item-status>
-              \${statusOptions(item.status)}
-            </select>
-            <button class="secondary" data-action="status">Update Status</button>
-            <button class="secondary" data-action="edit">\${isEditing ? "Close edit" : "Edit"}</button>
-            <button class="danger" data-action="archive">Archive</button>
-          </div>
+          \${isEditing ? '<div class="compact-row-editor">' + ledgerItemEditorHtml(item) + '</div>' : ""}
         \`;
-        card.querySelector('[data-action="status"]').addEventListener("click", () => updateItemStatus(item.id, card));
-        card.querySelector('[data-action="edit"]').addEventListener("click", () => {
+        wrap.querySelector('[data-action="edit"]').addEventListener("click", () => {
           state.editingItemId = state.editingItemId === item.id ? null : item.id;
           renderItems();
         });
-        card.querySelector('[data-action="save-edit"]')?.addEventListener("click", () => saveLedgerItemEdit(item.id, card));
-        card.querySelector('[data-action="cancel-edit"]')?.addEventListener("click", () => {
+        wrap.querySelector('[data-action="save-edit"]')?.addEventListener("click", () => saveLedgerItemEdit(item.id, wrap));
+        wrap.querySelector('[data-action="cancel-edit"]')?.addEventListener("click", () => {
           state.editingItemId = null;
           renderItems();
         });
-        card.querySelector('[data-action="archive"]').addEventListener("click", () => archiveItem(item.id));
-        itemsEl.appendChild(card);
+        wrap.querySelector('[data-action="archive"]').addEventListener("click", () => archiveItem(item.id));
+        itemsEl.appendChild(wrap);
       });
+      updateSidebarBadges();
     }
 
     function ledgerItemEditorHtml(item) {
@@ -1537,6 +1994,7 @@ const APP_HTML = `<!doctype html>
         '<div class="grid">' +
           '<label>Due date<input data-ledger-field="due_date" value="' + escapeAttr(item.fields?.due_date || "") + '" /></label>' +
           '<label>Follow-up date<input data-ledger-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
+          '<label>URL<input data-ledger-field="url" value="' + escapeAttr(item.fields?.url || "") + '" /></label>' +
         '</div>' +
         '<div class="actions">' +
           '<button data-action="save-edit">Save edit</button>' +
@@ -1572,6 +2030,9 @@ const APP_HTML = `<!doctype html>
         status: value("status") || undefined,
         due_date: value("due_date") || null,
         follow_up_date: value("follow_up_date") || null,
+        fields: {
+          url: value("url") || null,
+        },
       };
     }
 
@@ -1669,6 +2130,47 @@ const APP_HTML = `<!doctype html>
 
     function displayItemStatus(status) {
       return ["ready", "open", "saved"].includes(status) ? "ready" : status;
+    }
+
+    function formatDate(isoString) {
+      if (!isoString) return "";
+      try {
+        const d = new Date(isoString);
+        const now = new Date();
+        const diffMs = now - d;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        if (diffDays === 0) return "today";
+        if (diffDays === 1) return "yesterday";
+        if (diffDays < 7) return diffDays + "d ago";
+        return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      } catch { return isoString; }
+    }
+
+    function statusPillClass(status) {
+      const displayed = displayItemStatus(status);
+      if (displayed === "ready") return "status-active";
+      if (displayed === "waiting" || displayed === "in_progress") return "status-waiting";
+      if (displayed === "done") return "status-done";
+      return "";
+    }
+
+    function switchView(view) {
+      state.currentView = view;
+      document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+      const target = document.getElementById("view-" + view);
+      if (target) target.classList.add("active");
+      document.querySelectorAll(".sidebar-nav li").forEach((li) => {
+        li.classList.toggle("active", li.dataset.view === view);
+      });
+    }
+
+    function updateSidebarBadges() {
+      const pendingBadge = $("pendingBadge");
+      if (pendingBadge) {
+        const count = state.pendingDumps.length;
+        pendingBadge.textContent = count > 0 ? String(count) : "";
+        pendingBadge.style.display = count > 0 ? "inline" : "none";
+      }
     }
 
     function escapeHtml(value) {

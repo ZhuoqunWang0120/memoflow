@@ -4,122 +4,181 @@ export const CAPTURE_HTML = `<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MemoFlow Capture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f7f4;
-      --ink: #20211f;
-      --muted: #686c63;
-      --line: #d9d8cf;
-      --panel: #ffffff;
-      --accent: #256f5b;
-      --accent-2: #334f8d;
-      --danger: #9f3535;
-      --shadow: 0 1px 2px rgba(30, 34, 31, 0.08);
+      --bg: #f8f9ff;
+      --ink: #121c28;
+      --muted: #424845;
+      --line: #E8EDEB;
+      --accent: #4e6058;
+      --danger: #ba1a1a;
+      --danger-bg: #ffdad6;
+      --danger-text: #93000a;
+      --success-border: #b8cbc2;
+      --success-bg: #f0f8f4;
+      --success-text: #1a3d2e;
+      --font-headline: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+      --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
     }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; }
     body {
-      margin: 0;
       background: var(--bg);
       color: var(--ink);
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.45;
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
     }
     main {
-      width: min(520px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 24px 0 48px;
+      width: min(440px, 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      animation: fadeIn 0.4s ease forwards;
     }
-    header {
-      margin-bottom: 18px;
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
-    h1 {
-      font-size: 22px;
-      margin: 0;
-      letter-spacing: 0;
+    header h1 {
+      font-family: var(--font-headline);
+      font-size: 26px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--accent);
+      margin-bottom: 4px;
     }
     .muted {
       color: var(--muted);
+      font-size: 14px;
+      opacity: 0.8;
+    }
+    section { min-width: 0; }
+
+    /* Post-it note cards */
+    .postit {
+      border: none;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.1);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+    }
+    .postit:hover {
+      box-shadow: 6px 6px 16px rgba(0, 0, 0, 0.12);
+    }
+    .postit-memo {
+      background: #fce4ec;
+      transform: rotate(-1.2deg);
+    }
+    .postit-memo:hover { transform: rotate(-0.5deg); }
+    .postit-memory {
+      background: #e8f5e9;
+      transform: rotate(1deg);
+    }
+    .postit-memory:hover { transform: rotate(0.3deg); }
+
+    .postit-label {
+      font-family: var(--font-body);
       font-size: 13px;
-    }
-    section {
-      min-width: 0;
-      margin-bottom: 18px;
-    }
-    h2 {
-      font-size: 15px;
-      margin: 0 0 8px;
-      letter-spacing: 0;
+      font-weight: 600;
+      letter-spacing: 0.04em;
       color: var(--muted);
-      font-weight: 650;
+      margin-bottom: 12px;
+      display: block;
     }
     textarea {
       width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #fff;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.6);
       color: var(--ink);
-      font: inherit;
-      padding: 9px 10px;
+      font-family: var(--font-body);
+      font-size: 15px;
+      line-height: 1.6;
+      padding: 12px 14px;
       min-height: 100px;
       resize: vertical;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    textarea::placeholder {
+      color: var(--muted);
+      opacity: 0.45;
+      font-style: italic;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+      background: rgba(255, 255, 255, 0.85);
     }
     button {
-      border: 1px solid transparent;
-      border-radius: 6px;
+      border: none;
+      border-radius: 8px;
       background: var(--accent);
       color: #fff;
-      font: inherit;
-      font-weight: 650;
-      padding: 9px 12px;
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 11px 20px;
+      min-height: 44px;
+      width: 100%;
       cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.1s ease;
     }
-    button:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
+    button:hover { opacity: 0.88; }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
     .controls {
       display: flex;
       gap: 10px;
       align-items: center;
-      margin-top: 8px;
-    }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-      box-shadow: var(--shadow);
+      margin-top: 14px;
     }
     .error {
       display: none;
-      border: 1px solid #e3b7b7;
-      background: #fff3f3;
-      color: #842323;
+      border: 1px solid var(--danger-bg);
+      background: var(--danger-bg);
+      color: var(--danger-text);
       border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 12px;
+      padding: 12px 16px;
+      font-size: 14px;
       white-space: pre-wrap;
     }
     .success {
       display: none;
-      border: 1px solid #b7e3c3;
-      background: #f3fff6;
-      color: #1a5c2a;
+      border: 1px solid var(--success-border);
+      background: var(--success-bg);
+      color: var(--success-text);
       border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 12px;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 500;
     }
     .workspace-link {
-      display: inline-block;
-      margin-top: 12px;
-      color: var(--accent-2);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--accent);
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 500;
       text-decoration: none;
+      opacity: 0.6;
+      transition: opacity 0.15s ease;
     }
-    .workspace-link:hover {
-      text-decoration: underline;
+    .workspace-link:hover { opacity: 1; }
+    .workspace-link::before { content: "\\2190  "; }
+    @media (max-width: 480px) {
+      body { align-items: flex-start; padding: 24px 16px; }
+      main { width: 100%; }
+      .postit-memo, .postit-memory { transform: none; }
     }
   </style>
 </head>
@@ -134,9 +193,9 @@ export const CAPTURE_HTML = `<!doctype html>
     <div id="success" class="success"></div>
 
     <section>
-      <div class="card">
-        <h2>Quick Memo</h2>
-        <textarea id="memoText" placeholder="Dump a thought, idea, or reminder..."></textarea>
+      <div class="postit postit-memo">
+        <span class="postit-label">Quick Memo</span>
+        <textarea id="memoText" placeholder="What's on your mind? Just type and dump..."></textarea>
         <div class="controls">
           <button id="saveDumpBtn">Save for later</button>
         </div>
@@ -144,8 +203,8 @@ export const CAPTURE_HTML = `<!doctype html>
     </section>
 
     <section>
-      <div class="card">
-        <h2>Add Memory</h2>
+      <div class="postit postit-memory">
+        <span class="postit-label">Add Memory</span>
         <textarea id="memoryText" placeholder="A fact, context, or note for later..."></textarea>
         <div class="controls">
           <button id="addMemoryBtn">Add memory</button>

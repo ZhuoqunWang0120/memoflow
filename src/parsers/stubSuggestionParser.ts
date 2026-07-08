@@ -2,6 +2,7 @@ import type { Suggestion, SuggestionResult, SuggestionType } from "../schemas/su
 import type { ParseSuggestionInput, SuggestionParser } from "./types.js";
 
 const URL_RE = /^https?:\/\/\S+$/i;
+const URL_IN_TEXT_RE = /https?:\/\/\S+/i;
 const ACTION_START_RE = /\b(email|call|text|send|submit|finish|complete|pay|book|schedule|remind|follow up|check|update|review|buy|ask|pick up|waiting on|waiting for)\b|投递|带\s*id|带\s*ID|发邮件|回复|开始找工作|还设备|买菜/i;
 const TASK_RE = ACTION_START_RE;
 const IDEA_RE = /\b(maybe|idea|could|should support|feature|someday|later|would be nice)\b/i;
@@ -26,6 +27,9 @@ export const stubSuggestionParser: SuggestionParser = {
 function splitMemo(rawText: string): string[] {
   const trimmed = rawText.trim();
   if (URL_RE.test(trimmed)) return [trimmed];
+
+  // If text contains a URL, keep as one chunk to avoid splitting the URL out of context
+  if (URL_IN_TEXT_RE.test(trimmed) && !trimmed.includes("\n")) return [trimmed];
 
   return rawText
     .split(/(?:\n+|[.;!?]+|\balso\b|,\s*(?=\b(?:email|call|text|send|submit|finish|complete|pay|book|schedule|remind|follow up|check|update|review|buy|ask|pick up|waiting on|waiting for)\b))/i)
@@ -59,6 +63,11 @@ function buildSuggestion(chunk: string): Suggestion {
 
   if (URL_RE.test(chunk)) {
     suggestedFields.url = chunk;
+  } else {
+    const urlMatch = chunk.match(URL_IN_TEXT_RE);
+    if (urlMatch) {
+      suggestedFields.url = urlMatch[0];
+    }
   }
 
   return {
@@ -78,6 +87,7 @@ function classify(text: string): SuggestionType {
   if (EXPLORATION_RE.test(text)) return "exploration";
   if (IDEA_RE.test(text) || BARE_IDEA_RE.test(text)) return "idea";
   if (REFERENCE_RE.test(text)) return "reference";
+  if (URL_IN_TEXT_RE.test(text)) return "reference";
   return "clarify_needed";
 }
 
@@ -151,6 +161,7 @@ function confidenceFor(type: SuggestionType): number {
 function categoryFor(type: SuggestionType, text: string): string | null {
   if (/\bDuke|SEVP|OPT|immigration|eval\b/i.test(text)) return "admin/immigration";
   if (/\bsmart memo|memoflow|product|feature|status\b/i.test(text)) return "product";
+  if (/linkedin/i.test(text)) return "networking";
   if (type === "reference") return "reference";
   return null;
 }

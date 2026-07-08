@@ -1375,3 +1375,191 @@ npm run eval:items      # 17/17 passed
 npm run eval:memory     # 11/11 passed
 npm run eval:context    # 15/15 passed
 ```
+
+## Main Workspace UI Refactor
+
+Implemented on 2026-06-10.
+
+### Decision: sidebar-based focused views
+
+The main workspace (`/`) moved from a stacked all-in-one layout to a
+sidebar-based focused view system.
+
+Rationale:
+
+- The previous stacked sections created long-document fatigue and cognitive
+  load. Every section was visible simultaneously, which was overwhelming for an
+  ADHD-friendly tool.
+- MemoFlow should present one focused area at a time.
+- Progressive disclosure: the user sees only what they need right now.
+
+New structure:
+
+```text
+Sidebar navigation:
+  Capture   → Quick Capture area + suggestions
+  Items     → Saved item ledger with compact rows
+  Memory    → Freeform memory with compact rows
+  Pending   → Pending dump review
+```
+
+Clicking sidebar items switches the main content view without a page reload.
+View switching is implemented with CSS class toggling (`.view.active`).
+
+### Decision: compact list rows
+
+Items and Memory views use compact rows instead of card-per-entry layouts.
+
+Row format:
+
+```text
+[type-chip] Title text...    [status-pill] [date]    [Edit] [Archive]
+```
+
+- Each entry is one compact row, not a card.
+- Actions live on the right side.
+- Actions are subtly revealed on hover.
+- No red destructive buttons — archive and ignore use muted/subtle styling.
+- Editing is toggled inline: clicking Edit expands an editor below the row.
+
+Rationale:
+
+- Cards per entry are space-costly and increase cognitive load.
+- Compact rows allow scanning many entries quickly.
+- Muted archive/ignore buttons reduce emotional friction compared to red
+  destructive buttons.
+
+### Visual principles
+
+- Capture/dump area uses a warm cream background (#fef9ef) to feel post-it-like,
+  informal, and low-friction.
+- Saved items should feel organized, professional, clean, and trustworthy.
+- Memory should feel lightweight and freeform, not like a knowledge-base
+  dashboard.
+- Pending uses compact rows with Review and Ignore actions.
+
+### Boundary
+
+This is a UI/presentation refactor only:
+
+- No logic changes.
+- No schema changes.
+- No API contract changes.
+- No storage format changes.
+- Stitch references are style/layout references only — they are not treated as
+  source-of-truth implementation.
+- The `/capture` companion route is unchanged.
+
+### Boundary preserved behaviors
+
+All existing features still work:
+
+- Quick Capture: textarea, save-for-later, generate suggestions, parser
+  selector, use-memory/use-context toggles.
+- Suggestion review: editable suggestion cards, approve, reject, related
+  existing item handling, create-new-anyway, update-existing-instead, discard.
+- Item ledger: search, filter, sort, inline edit, archive.
+- Memory: add, list, edit, archive, delete, show-archived toggle.
+- Pending: review with parser settings, ignore.
+- `/capture` companion route.
+- All DOM IDs used by JS event listeners are preserved.
+
+### Verification
+
+```text
+npm run check           # TypeScript compiles clean
+npm run eval            # 17/17 passed
+npm run eval:items      # 17/17 passed
+npm run eval:memory     # 11/11 passed
+npm run eval:context    # 15/15 passed
+npm run eval:capture    # 13/13 passed
+```
+
+Browser verification:
+
+- Sidebar shows Capture / Items / Memory / Pending with active highlighting.
+- Switching views works without page reload.
+- Capture view has warm post-it-style capture area.
+- Items view shows compact rows with type chips, status pills, dates, Edit/Archive.
+- Item edit toggle expands inline editor.
+- Memory view shows compact rows with truncated text, status, Edit/Archive.
+- Memory edit toggle expands textarea with Save/Delete.
+- Pending view shows compact rows with Review/Ignore (no red buttons).
+- Save-for-later → Pending flow works.
+- Ignore pending dump works.
+- Sidebar badges update (pending count).
+- `/capture` route still works.
+
+### Post-refactor adjustments
+
+- Removed items count badge from sidebar. The items view is not a queue that
+  needs an attention indicator; the count added visual noise without clear
+  value.
+- rawText textarea now clears after suggestion review completion (all
+  approved/rejected), not just on save-for-later. Previously the textarea
+  stayed filled after review, which felt incomplete. Now the capture area
+  returns to a clean state after every review cycle.
+- Default generation settings changed: parser=llm, useMemory=on, useContext=on.
+  The stub parser and no-context modes remain available but are no longer the
+  default, since real usage should prefer the full pipeline.
+
+## Demo Strategy for First LinkedIn Post
+
+Implemented on 2026-06-10.
+
+### Decision: demo should emphasize task-state maintenance
+
+The first public demo should not show generic dump-to-task extraction.
+It should show MemoFlow's core differentiation: maintaining a trusted task
+ledger by detecting when a new thought relates to something already tracked.
+
+### Selected demo story
+
+```text
+Existing item:  Pick up medicine (task, ready)
+Memory:         Safeway is my usual pharmacy.
+Raw dump:       pick up ibuprofen at Safeway
+```
+
+Expected behavior:
+
+- MemoFlow generates a structured suggestion: "Pick up ibuprofen at Safeway".
+- It surfaces the related existing item "Pick up medicine" as a
+  possible_duplicate. The match is semantic (ibuprofen → medicine, not
+  exact-token), demonstrating context-aware interpretation.
+- The UI shows three human-in-the-loop choices:
+  - Create new anyway
+  - Update existing instead
+  - Discard
+- The demo clicks "Update existing instead" and opens the manual editor.
+
+### Demo data isolation
+
+Data is isolated in `data/demo/` via `MEMOFLOW_DATA_DIR` env var. All three
+store services (items, memory, dumps) respect this variable. Normal app
+behavior is completely unaffected.
+
+Added:
+- `MEMOFLOW_DATA_DIR` support in itemStoreService, memoryStoreService,
+  dumpStoreService
+- `scripts/demo-seed.mjs` — seeds sanitized demo data
+- `scripts/demo-record.mjs` — Playwright automated recording
+- `docs/demo-recording.md` — documentation
+
+### Recording approach
+
+- Playwright headless chromium, 1280×720
+- Suggestion API mocked via route interception (deterministic, no LLM cost)
+- Other APIs use real demo data
+- Output: `artifacts/demo/memoflow-demo.mp4` (~24s)
+- npm scripts: `npm run demo:record`, `npm run demo:seed`, `npm run demo:dev`
+
+### Intentional exclusions
+
+The demo intentionally avoids:
+- Real personal data
+- Prescription names (ibuprofen is OTC)
+- Health-sensitive details
+- Visa, school, or job-search examples
+- Full GitHub repo disclosure
+- Any hardcoded demo output in normal app behavior

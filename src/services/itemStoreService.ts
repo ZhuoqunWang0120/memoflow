@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { ItemSchema, ItemTypeSchema, type Item, type ItemFields, type ItemType } from "../schemas/item.js";
 import { getVisibleItems, type ArchivedVisibility, type ItemSortOption } from "./itemLedgerQuery.js";
 
-const DEFAULT_STORE_PATH = join(process.cwd(), "data", "items.jsonl");
+const DATA_DIR = process.env.MEMOFLOW_DATA_DIR ?? "data";
+const DEFAULT_STORE_PATH = join(process.cwd(), DATA_DIR, "items.jsonl");
 
 export type ItemStoreOptions = {
   storePath?: string;

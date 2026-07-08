@@ -37,6 +37,7 @@ Instructions:
   reference -> saved
   clarify_needed -> needs_clarification
 - suggested_fields may include follow_up_needed, due_date, waiting_on, url, tags, and category.
+- **URL extraction**: When the raw memo contains any URL (http/https link), ALWAYS extract it into suggested_fields.url. This applies even when the URL is embedded in descriptive text like "my linkedin link: https://..." or "check out https://...". Do not leave the URL only in the description — it must also appear in the url field.
 - Do not force optional fields. Use null when a field is unknown but included.
 - Current local date is ${currentDate}. Use this date for low-effort due-date inference when the wording has an observable time expression.
 - Date inference should be LLM-first with guardrails: identify the exact date phrase, normalize its meaning, then set due_date. Do not substring-match shorter phrases inside longer phrases.
@@ -296,4 +297,13 @@ Yellow banana problem
 Output:
 \`\`\`json
 {"suggestions":[{"type":"clarify_needed","title":"Clarify the Yellow banana problem","description":"The memo appears to use private shorthand without enough context to classify safely.","status":"needs_clarification","confidence":0.55,"needs_clarification":true,"clarification_question":"What does Yellow banana problem refer to, and should it be saved, explored, or turned into an action?","missing_context":["Meaning of Yellow banana problem","Whether this is a task, idea, exploration, or reference"],"suggested_fields":{"follow_up_needed":false,"due_date":null,"waiting_on":null}}]}
+\`\`\`
+
+Input:
+\`\`\`text
+my linkedin link: https://www.linkedin.com/in/carol-wang-915724122/
+\`\`\`
+Output:
+\`\`\`json
+{"suggestions":[{"type":"reference","title":"My LinkedIn Link","description":"Save LinkedIn profile link for future reference.","status":"saved","confidence":0.95,"needs_clarification":false,"suggested_fields":{"follow_up_needed":false,"due_date":null,"waiting_on":null,"url":"https://www.linkedin.com/in/carol-wang-915724122/","category":"networking"}}]}
 \`\`\``;

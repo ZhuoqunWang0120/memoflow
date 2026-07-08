@@ -3,7 +3,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { MemoryEntrySchema, type MemoryEntry } from "../schemas/memory.js";
 
-const DEFAULT_STORE_PATH = join(process.cwd(), "data", "memory.jsonl");
+const DATA_DIR = process.env.MEMOFLOW_DATA_DIR ?? "data";
+const DEFAULT_STORE_PATH = join(process.cwd(), DATA_DIR, "memory.jsonl");
 const DEFAULT_ACTIVE_MEMORY_LIMIT = 20;
 
 export type MemoryStoreOptions = {
