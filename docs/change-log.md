@@ -46,11 +46,18 @@
   - used additive static asset routes instead of introducing a bundler or framework
   - limited service worker caching to manifest and icon assets to reduce stale-app risk
   - kept installed app start URL at `/` to preserve the current primary app surface
+- Manual acceptance note:
+  - Tested basic PWA use on iPhone.
+  - App loaded successfully.
+  - Basic capture/save flow appeared to work.
+  - No obvious desktop/local regression observed.
 - Risks or follow-ups:
   - same-network iPhone HTTP access may not activate service worker because secure-context rules still apply
   - iPhone home-screen installation and notch/safe-area behavior were not exercised on a physical device in this session
   - there is still no `lint` script
   - there is still no `test` script
+  - Full service worker/offline behavior not verified unless tested over HTTPS or localhost.
+  - No automated browser smoke test exists yet.
 
 ## 2026-07-07
 
