@@ -2,8 +2,17 @@ export const CAPTURE_HTML = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f9ff" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="MemoFlow" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no" />
   <title>MemoFlow Capture</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon-180.png" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -35,7 +44,11 @@ export const CAPTURE_HTML = `<!doctype html>
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px 16px;
+      padding:
+        calc(24px + env(safe-area-inset-top))
+        calc(16px + env(safe-area-inset-right))
+        calc(24px + env(safe-area-inset-bottom))
+        calc(16px + env(safe-area-inset-left));
     }
     main {
       width: min(440px, 100%);
@@ -176,7 +189,14 @@ export const CAPTURE_HTML = `<!doctype html>
     .workspace-link:hover { opacity: 1; }
     .workspace-link::before { content: "\\2190  "; }
     @media (max-width: 480px) {
-      body { align-items: flex-start; padding: 24px 16px; }
+      body {
+        align-items: flex-start;
+        padding:
+          calc(24px + env(safe-area-inset-top))
+          calc(16px + env(safe-area-inset-right))
+          calc(24px + env(safe-area-inset-bottom))
+          calc(16px + env(safe-area-inset-left));
+      }
       main { width: 100%; }
       .postit-memo, .postit-memory { transform: none; }
     }
@@ -216,6 +236,12 @@ export const CAPTURE_HTML = `<!doctype html>
   </main>
 
   <script>
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+      });
+    }
+
     const errorEl = document.getElementById("error");
     const successEl = document.getElementById("success");
 

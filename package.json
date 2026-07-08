@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "npm run build --silent && node dist/webServer.js",
+    "dev:lan": "HOST=0.0.0.0 npm run dev",
     "suggest": "npm run build --silent && node dist/cli.js",
     "items": "npm run build --silent && node dist/itemsCli.js",
     "eval": "npm run build --silent && node dist/eval/runEval.js",
