@@ -7,6 +7,7 @@ dist/
 data/items.local.backup.jsonl
 data/dumps.jsonl
 data/items.jsonl
+data/memory.jsonl
 data/demo/
 artifacts/
 .claude/
