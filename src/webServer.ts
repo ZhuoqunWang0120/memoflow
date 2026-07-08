@@ -27,6 +27,38 @@ const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? "127.0.0.1";
 const CV_ROUTE = "/assets/carol-wang-cv-062026-webapp.pdf";
 const CV_PATH = join(process.cwd(), "public", "carol-wang-cv-062026-webapp.pdf");
+const STATIC_ASSET_ROUTES: Record<string, { filePath: string; contentType: string; cacheControl?: string }> = {
+  "/manifest.webmanifest": {
+    filePath: join(process.cwd(), "public", "manifest.webmanifest"),
+    contentType: "application/manifest+json; charset=utf-8",
+    cacheControl: "no-cache",
+  },
+  "/sw.js": {
+    filePath: join(process.cwd(), "public", "sw.js"),
+    contentType: "application/javascript; charset=utf-8",
+    cacheControl: "no-cache",
+  },
+  "/icons/icon.svg": {
+    filePath: join(process.cwd(), "public", "icons", "icon.svg"),
+    contentType: "image/svg+xml",
+    cacheControl: "public, max-age=604800",
+  },
+  "/icons/icon-192.png": {
+    filePath: join(process.cwd(), "public", "icons", "icon-192.png"),
+    contentType: "image/png",
+    cacheControl: "public, max-age=604800",
+  },
+  "/icons/icon-512.png": {
+    filePath: join(process.cwd(), "public", "icons", "icon-512.png"),
+    contentType: "image/png",
+    cacheControl: "public, max-age=604800",
+  },
+  "/icons/apple-touch-icon-180.png": {
+    filePath: join(process.cwd(), "public", "icons", "apple-touch-icon-180.png"),
+    contentType: "image/png",
+    cacheControl: "public, max-age=604800",
+  },
+};
 
 const GenerateSuggestionsRequestSchema = z.object({
   rawText: z.string().trim().min(1, "rawText is required"),
@@ -70,6 +102,17 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "GET" && req.url === "/capture") {
       sendHtml(res, CAPTURE_HTML);
+      return;
+    }
+
+    if ((req.method === "GET" || req.method === "HEAD") && req.url && STATIC_ASSET_ROUTES[req.url]) {
+      const asset = STATIC_ASSET_ROUTES[req.url]!;
+      const file = await readFile(asset.filePath);
+      sendStaticFile(res, file, {
+        contentType: asset.contentType,
+        cacheControl: asset.cacheControl,
+        headOnly: req.method === "HEAD",
+      });
       return;
     }
 
@@ -256,6 +299,19 @@ function sendPdf(res: ServerResponse, pdf: Buffer, headOnly = false): void {
   res.end(headOnly ? undefined : pdf);
 }
 
+function sendStaticFile(
+  res: ServerResponse,
+  file: Buffer,
+  options: { contentType: string; cacheControl?: string; headOnly?: boolean },
+): void {
+  res.writeHead(200, {
+    "Content-Type": options.contentType,
+    "Content-Length": String(file.byteLength),
+    "Cache-Control": options.cacheControl ?? "no-cache",
+  });
+  res.end(options.headOnly ? undefined : file);
+}
+
 function parseArchivedVisibility(value: string | null): ArchivedVisibility {
   if (value === "show" || value === "only" || value === "hide") return value;
   return "hide";
@@ -271,8 +327,18 @@ const APP_HTML = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f8f9ff" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="MemoFlow" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="description" content="MemoFlow is a local-first memo capture and review web app." />
   <title>MemoFlow Local</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon-180.png" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -307,6 +373,7 @@ const APP_HTML = `<!doctype html>
       font-family: var(--font-body);
       font-size: 16px;
       line-height: 1.5;
+      min-height: 100vh;
     }
     main {
       width: min(1200px, calc(100vw - 64px));
@@ -953,7 +1020,11 @@ const APP_HTML = `<!doctype html>
       }
       .sidebar-footer { display: none; }
       main.main-content {
-        padding: 20px 16px 48px;
+        padding:
+          calc(20px + env(safe-area-inset-top))
+          calc(16px + env(safe-area-inset-right))
+          calc(48px + env(safe-area-inset-bottom))
+          calc(16px + env(safe-area-inset-left));
       }
       .filter-bar { flex-direction: column; align-items: stretch; }
       .filter-search { width: 100%; }
@@ -1088,6 +1159,12 @@ const APP_HTML = `<!doctype html>
   </div>
 
   <script>
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+      });
+    }
+
     const state = {
       rawText: "",
       reviewingDumpId: null,
