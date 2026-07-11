@@ -10,11 +10,14 @@
     "suggest": "npm run build --silent && node dist/cli.js",
     "items": "npm run build --silent && node dist/itemsCli.js",
     "eval": "npm run build --silent && node dist/eval/runEval.js",
+    "eval:corrections": "npm run build --silent && node dist/eval/runCorrectionEval.js",
+    "eval:smoke": "npm run build --silent && node dist/eval/runSmokeEval.js",
     "eval:items": "npm run build --silent && node dist/eval/runItemLedgerEval.js",
     "eval:memory": "npm run build --silent && node dist/eval/runMemoryEval.js",
     "eval:context": "npm run build --silent && node dist/eval/runContextEval.js",
     "eval:capture": "npm run build --silent && node dist/eval/runCaptureEval.js",
     "check": "tsc --noEmit",
+    "screenshots:mobile": "node scripts/mobile-screenshots.mjs",
     "demo:seed": "node scripts/demo-seed.mjs",
     "demo:record": "node scripts/demo-record.mjs",
     "demo:dev": "MEMOFLOW_DATA_DIR=data/demo npm run dev"
@@ -25,7 +28,9 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
-    "playwright": "^1.60.0",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.61.1",
+    "pngjs": "^7.0.0",
     "typescript": "^5.5.3"
   }
 }

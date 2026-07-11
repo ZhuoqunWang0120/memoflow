@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getVisibleItems } from "../services/itemLedgerQuery.js";
 import type { Item } from "../schemas/item.js";
-import { add, archive, get, update } from "../services/itemStoreService.js";
+import { add, archive, get, unarchive, update } from "../services/itemStoreService.js";
 import { itemUpdatePatchFromRequest, UpdateItemRequestSchema } from "../services/itemUpdatePatch.js";
 
 type TestCase = {
@@ -201,6 +201,19 @@ const tests: TestCase[] = [
       const archived = await archive(created.id, { storePath });
       expect(archived.status === "archived", "Expected archived status");
       expect(Boolean(archived.archived_at), "Expected archived_at set");
+    },
+  },
+  {
+    name: "unarchive clears archived_at and restores default status after archive",
+    run: async () => {
+      const storePath = await tempStorePath();
+      const created = await add({ type: "task", title: "Unarchive test", status: "waiting" }, { storePath });
+      const archived = await archive(created.id, { storePath });
+      const restored = await unarchive(created.id, { storePath });
+
+      expect(archived.status === "archived", "Expected item archived first");
+      expect(restored.archived_at === null, "Expected archived_at cleared");
+      expect(restored.status === "ready", "Expected archived task to restore to default active status");
     },
   },
 ];
