@@ -5,7 +5,6 @@ export const SuggestionTypeSchema = z.enum([
   "exploration",
   "idea",
   "reference",
-  "clarify_needed",
 ]);
 
 export const SuggestionStatusSchema = z.string().min(1);

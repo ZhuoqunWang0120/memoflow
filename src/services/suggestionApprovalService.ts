@@ -18,11 +18,7 @@ export type SuggestionToItemInput = {
 
 export function suggestionToAddItemInput(input: SuggestionToItemInput): AddItemInput {
   const overrides = input.overrides ?? {};
-  const type = overrides.type ?? persistableType(input.suggestion);
-
-  if (!type) {
-    throw new Error("clarify_needed suggestions must be edited to task, exploration, idea, or reference before saving.");
-  }
+  const type = overrides.type ?? input.suggestion.type;
 
   const fields = {
     ...input.suggestion.suggested_fields,
@@ -33,7 +29,7 @@ export function suggestionToAddItemInput(input: SuggestionToItemInput): AddItemI
     type,
     title: overrides.title ?? input.suggestion.title,
     description: overrides.description ?? input.suggestion.description,
-    status: overrides.status ?? defaultStatusForType(type),
+    status: normalizeApprovedStatus(input.suggestion, type, overrides.status),
     fields,
     source: {
       kind: "suggestion",
@@ -43,12 +39,7 @@ export function suggestionToAddItemInput(input: SuggestionToItemInput): AddItemI
   };
 }
 
-function persistableType(suggestion: Suggestion): ItemType | null {
-  if (suggestion.type === "clarify_needed") return null;
-  return suggestion.type;
-}
-
-function defaultStatusForType(type: ItemType): string {
+export function defaultStatusForType(type: ItemType): string {
   switch (type) {
     case "task":
       return "ready";
@@ -58,4 +49,15 @@ function defaultStatusForType(type: ItemType): string {
     case "reference":
       return "saved";
   }
+}
+
+function normalizeApprovedStatus(
+  suggestion: Suggestion,
+  type: ItemType,
+  overrideStatus: string | undefined,
+): string {
+  const trimmed = overrideStatus?.trim();
+  if (!trimmed) return suggestion.needs_clarification ? "needs_clarification" : defaultStatusForType(type);
+
+  return trimmed;
 }

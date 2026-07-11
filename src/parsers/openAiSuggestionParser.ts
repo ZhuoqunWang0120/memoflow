@@ -1,5 +1,6 @@
-import { SuggestionResultSchema, type SuggestionResult } from "../schemas/suggestion.js";
+import { type SuggestionResult } from "../schemas/suggestion.js";
 import { buildDumpToSuggestionsPrompt } from "../prompts/dumpToSuggestions.js";
+import { normalizeSuggestionResult } from "../services/suggestionNormalizationService.js";
 import type { ParseSuggestionInput, SuggestionParser } from "./types.js";
 
 type OpenAiParserOptions = {
@@ -20,7 +21,7 @@ const suggestionResultJsonSchema = {
         properties: {
           type: {
             type: "string",
-            enum: ["task", "exploration", "idea", "reference", "clarify_needed"],
+            enum: ["task", "exploration", "idea", "reference"],
           },
           title: { type: "string" },
           description: { type: "string" },
@@ -124,7 +125,7 @@ export function createOpenAiSuggestionParser(options: OpenAiParserOptions = {}):
       const outputText = extractOutputText(payload);
       const parsedJson = JSON.parse(outputText) as unknown;
 
-      return SuggestionResultSchema.parse(parsedJson);
+      return normalizeSuggestionResult(parsedJson);
     },
   };
 }

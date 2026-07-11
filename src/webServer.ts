@@ -5,8 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join } from "node:path";
 import { z } from "zod";
 import { createSuggestionsFromDump } from "./services/suggestionService.js";
-import { add, archive, get, list, update } from "./services/itemStoreService.js";
-import { suggestionToAddItemInput } from "./services/suggestionApprovalService.js";
+import { add, archive, get, list, unarchive, update } from "./services/itemStoreService.js";
 import { ItemFieldsSchema, ItemTypeSchema } from "./schemas/item.js";
 import { SuggestionSchema } from "./schemas/suggestion.js";
 import { addDump, ignoreDump, listPending, markReviewed } from "./services/dumpStoreService.js";
@@ -22,6 +21,8 @@ import {
 } from "./services/memoryStoreService.js";
 import { buildSuggestionContext } from "./services/suggestionContextService.js";
 import { CAPTURE_HTML } from "./webServerCaptureHtml.js";
+import { saveReviewedSuggestion } from "./services/reviewedSuggestionSaveService.js";
+import { getUiStrings, serializeUiStringsForInlineScript } from "./i18n/uiStrings.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -62,7 +63,7 @@ const STATIC_ASSET_ROUTES: Record<string, { filePath: string; contentType: strin
 
 const GenerateSuggestionsRequestSchema = z.object({
   rawText: z.string().trim().min(1, "rawText is required"),
-  parser: z.enum(["stub", "llm"]).optional().default("stub"),
+  parser: z.enum(["stub", "llm"]).optional().default("llm"),
   useMemory: z.boolean().optional().default(false),
   useContext: z.boolean().optional().default(false),
 });
@@ -79,6 +80,11 @@ const AddApprovedItemRequestSchema = z.object({
   rawText: z.string(),
   suggestion: SuggestionSchema,
   overrides: ApprovalOverridesSchema.optional(),
+  reviewContext: z.object({
+    source: z.enum(["pending_review", "suggestion_review", "cli_review"]),
+    proposalId: z.string().min(1).optional(),
+    dumpId: z.string().min(1).optional(),
+  }).optional(),
 });
 
 const AddDumpRequestSchema = z.object({
@@ -226,12 +232,12 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/api/items") {
       const body = AddApprovedItemRequestSchema.parse(await readJson(req));
-      const input = suggestionToAddItemInput({
+      const { item } = await saveReviewedSuggestion({
         rawText: body.rawText,
         suggestion: body.suggestion,
         overrides: body.overrides,
+        reviewContext: body.reviewContext,
       });
-      const item = await add(input);
       sendJson(res, 201, item);
       return;
     }
@@ -239,6 +245,13 @@ const server = createServer(async (req, res) => {
     const archiveMatch = req.url?.match(/^\/api\/items\/([^/]+)\/archive$/);
     if (req.method === "POST" && archiveMatch?.[1]) {
       const item = await archive(decodeURIComponent(archiveMatch[1]));
+      sendJson(res, 200, item);
+      return;
+    }
+
+    const unarchiveMatch = req.url?.match(/^\/api\/items\/([^/]+)\/unarchive$/);
+    if (req.method === "POST" && unarchiveMatch?.[1]) {
+      const item = await unarchive(decodeURIComponent(unarchiveMatch[1]));
       sendJson(res, 200, item);
       return;
     }
@@ -323,6 +336,9 @@ function parseItemSort(value: string | null): ItemSortOption | undefined {
   throw new Error(`Invalid item sort: ${value}`);
 }
 
+const ui = getUiStrings();
+const uiJson = serializeUiStringsForInlineScript();
+
 const APP_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -334,8 +350,8 @@ const APP_HTML = `<!doctype html>
   <meta name="apple-mobile-web-app-title" content="MemoFlow" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="format-detection" content="telephone=no" />
-  <meta name="description" content="MemoFlow is a local-first memo capture and review web app." />
-  <title>MemoFlow Local</title>
+  <meta name="description" content="${ui.appMetaDescription}" />
+  <title>${ui.appTitleLocal}</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon-180.png" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
@@ -366,6 +382,16 @@ const APP_HTML = `<!doctype html>
       --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
     }
 
+    html {
+      max-width: 100%;
+      overflow-x: hidden;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+    body, #root {
+      max-width: 100%;
+      overflow-x: hidden;
+    }
     * { box-sizing: border-box; margin: 0; }
     body {
       background: var(--bg);
@@ -376,7 +402,8 @@ const APP_HTML = `<!doctype html>
       min-height: 100vh;
     }
     main {
-      width: min(1200px, calc(100vw - 64px));
+      width: min(1200px, 100%);
+      max-width: calc(100% - 64px);
       margin: 0 auto;
       padding: 32px 0 64px;
     }
@@ -477,9 +504,11 @@ const APP_HTML = `<!doctype html>
       background: var(--panel);
       color: var(--ink);
       font-family: var(--font-body);
-      font-size: 15px;
+      font-size: 16px;
       padding: 10px 12px;
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      min-width: 0;
+      max-width: 100%;
     }
     textarea:focus, input:focus, select:focus {
       outline: none;
@@ -490,13 +519,21 @@ const APP_HTML = `<!doctype html>
       min-height: 120px;
       resize: vertical;
     }
+    input[type="date"] {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      display: block;
+    }
     label {
       display: grid;
       gap: 4px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 600;
       letter-spacing: 0.02em;
+      min-width: 0;
     }
     button {
       border: none;
@@ -504,7 +541,7 @@ const APP_HTML = `<!doctype html>
       background: var(--accent);
       color: #fff;
       font-family: var(--font-body);
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 500;
       padding: 10px 16px;
       min-height: 40px;
@@ -574,6 +611,8 @@ const APP_HTML = `<!doctype html>
     .stack {
       display: grid;
       gap: 10px;
+      min-width: 0;
+      max-width: 100%;
     }
     .card {
       background: var(--panel);
@@ -668,7 +707,7 @@ const APP_HTML = `<!doctype html>
       overflow-wrap: anywhere;
     }
     @media (max-width: 900px) {
-      main { width: min(100vw - 32px, 740px); padding: 24px 0 48px; }
+      main { width: min(740px, 100%); max-width: calc(100% - 32px); padding: 24px 0 48px; }
       header { display: grid; }
       .contact-block {
         justify-items: start;
@@ -705,13 +744,13 @@ const APP_HTML = `<!doctype html>
     }
     .sidebar-brand {
       font-family: var(--font-headline);
-      font-size: 20px;
+      font-size: 24px;
       font-weight: 600;
       color: var(--accent);
       letter-spacing: -0.01em;
     }
     .sidebar-subtitle {
-      font-size: 12px;
+      font-size: 13px;
       color: var(--muted);
       opacity: 0.6;
       margin-top: 4px;
@@ -734,6 +773,49 @@ const APP_HTML = `<!doctype html>
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+    .nav-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-block;
+      flex-shrink: 0;
+      font-size: 0;
+      line-height: 0;
+      color: currentColor;
+      position: relative;
+    }
+    .nav-icon::before {
+      content: "";
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: currentColor;
+      mask-repeat: no-repeat;
+      mask-position: center;
+      mask-size: contain;
+      -webkit-mask-repeat: no-repeat;
+      -webkit-mask-position: center;
+      -webkit-mask-size: contain;
+    }
+    .nav-label {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .sidebar-nav li[data-view="capture"] .nav-icon::before {
+      mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 8v8\"/><path d=\"M8 12h8\"/></svg>');
+      -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 8v8\"/><path d=\"M8 12h8\"/></svg>');
+    }
+    .sidebar-nav li[data-view="items"] .nav-icon::before {
+      mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9 6h11\"/><path d=\"M9 12h11\"/><path d=\"M9 18h11\"/><path d=\"M4 6h.01\"/><path d=\"M4 12h.01\"/><path d=\"M4 18h.01\"/></svg>');
+      -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9 6h11\"/><path d=\"M9 12h11\"/><path d=\"M9 18h11\"/><path d=\"M4 6h.01\"/><path d=\"M4 12h.01\"/><path d=\"M4 18h.01\"/></svg>');
+    }
+    .sidebar-nav li[data-view="memory"] .nav-icon::before {
+      mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3a3 3 0 0 0-3 3v1.2a3.5 3.5 0 0 1-1.03 2.47L6.2 11.44A3 3 0 0 0 8.32 16h7.36a3 3 0 0 0 2.12-5.12l-1.77-1.77A3.5 3.5 0 0 1 15 7.64V6a3 3 0 0 0-3-3Z\"/><path d=\"M9.5 16a2.5 2.5 0 0 0 5 0\"/></svg>');
+      -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3a3 3 0 0 0-3 3v1.2a3.5 3.5 0 0 1-1.03 2.47L6.2 11.44A3 3 0 0 0 8.32 16h7.36a3 3 0 0 0 2.12-5.12l-1.77-1.77A3.5 3.5 0 0 1 15 7.64V6a3 3 0 0 0-3-3Z\"/><path d=\"M9.5 16a2.5 2.5 0 0 0 5 0\"/></svg>');
+    }
+    .sidebar-nav li[data-view="pending"] .nav-icon::before {
+      mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 5h16v14H4z\"/><path d=\"M8 9h8\"/><path d=\"M8 13h8\"/></svg>');
+      -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 5h16v14H4z\"/><path d=\"M8 9h8\"/><path d=\"M8 13h8\"/></svg>');
     }
     .sidebar-nav li:hover {
       background: var(--surface-low);
@@ -806,6 +888,10 @@ const APP_HTML = `<!doctype html>
     /* ===== View Switching ===== */
     .view { display: none; }
     .view.active { display: block; }
+    .view {
+      min-width: 0;
+      max-width: 100%;
+    }
 
     /* ===== Status Bar ===== */
     .status-bar {
@@ -820,7 +906,7 @@ const APP_HTML = `<!doctype html>
 
     /* ===== View Header ===== */
     .view-header {
-      margin-bottom: 20px;
+      margin-bottom: 18px;
     }
     .view-title {
       font-family: var(--font-headline);
@@ -856,6 +942,56 @@ const APP_HTML = `<!doctype html>
       flex-wrap: wrap;
       align-items: center;
       margin-bottom: 20px;
+      min-width: 0;
+      max-width: 100%;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 10px;
+    }
+    .filter-bar > * { min-width: 0; max-width: 100%; }
+    .items-search-shell {
+      margin-bottom: 12px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 10px;
+      box-shadow: var(--shadow);
+    }
+    .items-chip-strip {
+      display: none;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      padding-right: calc(16px + env(safe-area-inset-right));
+      margin-bottom: 12px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .items-chip-strip::-webkit-scrollbar {
+      display: none;
+    }
+    .filter-chip {
+      border: 1px solid var(--line);
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1;
+      padding: 10px 14px;
+      white-space: nowrap;
+    }
+    .filter-chip.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .mobile-filter-details {
+      margin-bottom: 20px;
+    }
+    .mobile-filter-details > summary {
+      display: none;
     }
     .filter-search {
       width: 200px;
@@ -873,20 +1009,33 @@ const APP_HTML = `<!doctype html>
       border-radius: var(--radius-card);
       padding: 16px;
       margin-bottom: 20px;
+      box-shadow: var(--shadow);
+    }
+    .memory-row-text {
+      display: block;
+      font-size: 16px;
+      line-height: 1.5;
+      min-width: 0;
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: break-word;
+      word-break: break-word;
     }
 
     /* ===== Compact Rows ===== */
     .compact-row {
       display: flex;
       flex-wrap: wrap;
-      align-items: center;
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--line);
-      gap: 10px;
+      align-items: flex-start;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      gap: 8px;
       transition: background 0.15s ease;
-    }
-    .compact-row:last-child {
-      border-bottom: none;
+      max-width: 100%;
+      min-width: 0;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: var(--shadow);
     }
     .compact-row:hover {
       background: var(--surface-low);
@@ -896,47 +1045,69 @@ const APP_HTML = `<!doctype html>
     }
     .compact-row-main {
       display: flex;
-      align-items: center;
-      gap: 10px;
+      align-items: flex-start;
+      gap: 8px;
       flex: 1;
       min-width: 0;
+      max-width: 100%;
     }
     .compact-row-text {
       flex: 1;
       min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
       font-size: 14px;
       color: var(--ink);
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .compact-row-title {
       flex: 1;
       min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-weight: 500;
-      font-size: 14px;
+      font-weight: 600;
+      font-size: 17px;
+      line-height: 1.32;
       color: var(--ink);
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      text-align: left;
     }
     .compact-row-meta {
       display: flex;
       align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
+      gap: 6px;
+      flex-shrink: 1;
+      flex-wrap: wrap;
+      min-width: 0;
+      max-width: 100%;
+      justify-content: flex-start;
     }
     .compact-row-date {
       font-size: 12px;
       color: var(--muted);
       opacity: 0.6;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     .compact-row-actions {
       display: flex;
-      gap: 4px;
+      gap: 6px;
       flex-shrink: 0;
-      opacity: 0.5;
+      opacity: 0.75;
       transition: opacity 0.15s ease;
+      flex-wrap: wrap;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .compact-row-action-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
+      margin-right: auto;
     }
     .compact-row:hover .compact-row-actions {
       opacity: 1;
@@ -959,6 +1130,50 @@ const APP_HTML = `<!doctype html>
     }
     .review-setup-panel .card {
       margin-top: 8px;
+    }
+    .suggestion-card {
+      padding: 14px;
+    }
+    .suggestion-primary-grid,
+    .suggestion-secondary-grid {
+      min-width: 0;
+    }
+    .suggestion-secondary-grid {
+      background: rgba(238, 244, 255, 0.72);
+      border: 1px solid #dde8f0;
+      border-radius: 14px;
+      padding: 12px;
+      margin-top: 12px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .suggestion-secondary-grid label {
+      color: var(--muted);
+      opacity: 0.9;
+      font-size: 13px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+    }
+    .suggestion-secondary-grid input,
+    .suggestion-secondary-grid select {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+    }
+    .suggestion-card .row-title {
+      font-size: 18px;
+      line-height: 1.32;
+    }
+    .suggestion-card [data-field="title"] {
+      font-size: 18px;
+      line-height: 1.32;
+      font-weight: 600;
+    }
+    .suggestion-card .actions {
+      margin-top: 16px;
     }
 
     /* ===== Type Chip ===== */
@@ -1000,53 +1215,286 @@ const APP_HTML = `<!doctype html>
         width: 100%;
         min-width: unset;
         height: auto;
-        position: relative;
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: center;
-        padding: 12px 16px;
-        gap: 12px;
+        position: static;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        padding: 0;
+        gap: 0;
+        overflow-x: hidden;
+        background: transparent;
+        border-right: none;
       }
       .sidebar-header {
-        padding: 0;
-        border-bottom: none;
+        position: sticky;
+        top: 0;
+        z-index: 60;
+        padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+        border-bottom: 1px solid var(--line);
         margin-bottom: 0;
+        min-width: 0;
+        background: rgba(248, 249, 255, 0.92);
+        backdrop-filter: blur(12px);
       }
+      .sidebar-subtitle { display: none; }
       .sidebar-nav {
         display: flex;
-        gap: 4px;
-        padding: 0;
+        gap: 2px;
+        padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
         flex: unset;
+        flex-wrap: nowrap;
+        width: auto;
+        min-width: 0;
+        overflow: visible;
+        background: rgba(229, 238, 255, 0.75);
+        border-top: 1px solid var(--line);
+        border-radius: 20px 20px 0 0;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 70;
+        justify-content: space-around;
+        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.06);
+        backdrop-filter: blur(12px);
+      }
+      .sidebar-nav li {
+        flex: 1 1 0;
+        min-width: 0;
+        white-space: normal;
+        font-size: 12px;
+        padding: 8px 6px;
+        margin-bottom: 0;
+        border-radius: 14px;
+        flex-direction: column;
+        justify-content: center;
+        text-align: center;
+        gap: 4px;
+        position: relative;
+      }
+      .sidebar-nav li.active {
+        background: var(--primary-fixed);
+      }
+      .nav-icon {
+        width: 22px;
+        height: 22px;
+      }
+      .nav-label {
+        font-size: 12px;
+        line-height: 1.15;
+      }
+      .badge {
+        position: absolute;
+        top: 4px;
+        right: 14px;
       }
       .sidebar-footer { display: none; }
       main.main-content {
         padding:
-          calc(20px + env(safe-area-inset-top))
+          12px
           calc(16px + env(safe-area-inset-right))
-          calc(48px + env(safe-area-inset-bottom))
+          calc(120px + env(safe-area-inset-bottom))
           calc(16px + env(safe-area-inset-left));
       }
-      .filter-bar { flex-direction: column; align-items: stretch; }
-      .filter-search { width: 100%; }
-      .filter-select { width: 100%; }
+      .status-bar {
+        min-height: 0;
+        margin-bottom: 4px;
+      }
+      .items-chip-strip {
+        display: flex;
+      }
+      .items-search-shell {
+        padding: 8px 10px;
+      }
+      .mobile-filter-details > summary {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        list-style: none;
+        cursor: pointer;
+        border: 1px solid var(--line);
+        border-radius: 9999px;
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+        padding: 10px 14px;
+        margin-bottom: 10px;
+      }
+      .mobile-filter-details[open] > summary {
+        margin-bottom: 10px;
+      }
+      .filter-bar {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 8px;
+        margin-bottom: 0;
+      }
+      .filter-search {
+        width: 100%;
+        grid-column: 1 / -1;
+      }
+      .filter-select {
+        width: 100%;
+        min-width: 0;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .capture-area {
+        padding: 16px;
+      }
+      .capture-area .controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+      }
+      .capture-area .controls > button.secondary {
+        width: 100%;
+      }
+      .generation-settings {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        align-items: stretch;
+      }
+      .generation-settings .parser,
+      .generation-settings .checkbox-row {
+        width: 100%;
+      }
+      .generation-settings .checkbox-row {
+        min-height: 44px;
+        padding: 0 2px;
+      }
+      .generation-settings button {
+        width: 100%;
+        grid-column: 1 / -1;
+      }
+      .compact-row {
+        padding: 14px;
+      }
+      .compact-row-main {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas:
+          "chip title"
+          "meta meta"
+          "actions actions";
+        align-items: start;
+        row-gap: 6px;
+        column-gap: 8px;
+      }
+      .type-chip {
+        grid-area: chip;
+        align-self: start;
+      }
+      .compact-row-title,
+      .compact-row-text {
+        grid-area: title;
+        align-self: start;
+      }
+      .compact-row-title {
+        font-size: 17px;
+        line-height: 1.3;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .compact-row-text {
+        font-size: 16px;
+        line-height: 1.45;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .compact-row-meta {
+        grid-area: meta;
+      }
+      .compact-row-actions {
+        grid-area: actions;
+        opacity: 1;
+        width: 100%;
+        justify-content: flex-start;
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 8px;
+      }
+      .compact-row-action-meta {
+        width: auto;
+        flex: 0 1 auto;
+        margin-right: auto;
+        flex-wrap: nowrap;
+      }
+      .compact-row-actions .subtle-btn {
+        max-width: 100%;
+        flex: 0 0 auto;
+      }
+      .memory-input-area .controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+      }
+      .memory-input-area .controls .checkbox-row {
+        justify-content: flex-start;
+      }
+      .memory-row-text {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      #reviewControls .row-head {
+        flex-direction: column;
+      }
+      #reviewControls .actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      #reviewControls .actions button {
+        width: 100%;
+      }
+      .suggestion-card {
+        padding: 14px;
+      }
+      .suggestion-card .meta {
+        margin-bottom: 12px;
+      }
+      .suggestion-primary-grid {
+        gap: 10px;
+      }
+      .suggestion-secondary-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .suggestion-card .actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .suggestion-card .actions button {
+        width: 100%;
+        min-height: 46px;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="app-layout">
+  <div id="root" class="app-layout">
     <nav class="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-brand">MemoFlow</div>
-        <div class="sidebar-subtitle">Local file store</div>
+        <div class="sidebar-subtitle">${ui.localFileStore}</div>
       </div>
       <ul class="sidebar-nav">
-        <li class="active" data-view="capture">Capture</li>
-        <li data-view="items">Items</li>
-        <li data-view="memory">Memory</li>
-        <li data-view="pending">Pending <span class="badge" id="pendingBadge"></span></li>
+        <li class="active" data-view="capture"><span class="nav-icon">add_circle</span><span class="nav-label">${ui.navCapture}</span></li>
+        <li data-view="items"><span class="nav-icon">list_alt</span><span class="nav-label">${ui.navItems}</span></li>
+        <li data-view="memory"><span class="nav-icon">psychology</span><span class="nav-label">${ui.navMemory}</span></li>
+        <li data-view="pending"><span class="nav-icon">inbox</span><span class="nav-label">${ui.navPending}</span><span class="badge" id="pendingBadge"></span></li>
       </ul>
       <div class="sidebar-footer">
-        <a href="/capture" class="sidebar-link">Open Capture ↗</a>
+        <a href="/capture" class="sidebar-link">${ui.openCapture}</a>
         <div class="sidebar-contact">
           <div class="sidebar-contact-text">Carol · open to work: AI Eng, MLE, alt data</div>
           <div class="sidebar-contact-links">
@@ -1062,58 +1510,65 @@ const APP_HTML = `<!doctype html>
 
       <div id="view-capture" class="view active">
         <div class="capture-area">
-          <div class="capture-label">Quick Capture</div>
-          <textarea id="rawText" placeholder="Dump a thought, idea, or reminder..."></textarea>
+          <div class="capture-label">${ui.captureQuickCapture}</div>
+          <textarea id="rawText" placeholder="${ui.capturePlaceholder}"></textarea>
           <div class="controls">
-            <button id="saveLaterBtn" class="secondary">Save for later</button>
+            <button id="saveLaterBtn" class="secondary">${ui.saveForLater}</button>
             <div id="generationSettings" class="generation-settings">
-              <select id="parser" class="parser" aria-label="Parser">
-                <option value="llm">llm</option>
-                <option value="stub">stub</option>
-              </select>
               <label class="checkbox-row">
                 <input id="useMemory" type="checkbox" checked />
-                Use memory
+                ${ui.useMemory}
               </label>
               <label class="checkbox-row">
                 <input id="useContext" type="checkbox" checked />
-                Use context
+                ${ui.useContext}
               </label>
-              <button id="generateBtn">Generate suggestions now</button>
+              <button id="generateBtn">${ui.generateSuggestionsNow}</button>
             </div>
           </div>
         </div>
         <div id="reviewControls"></div>
         <div id="suggestions" class="stack">
-          <div class="empty">Generate suggestions from a memo dump, then approve, edit, or reject each card.</div>
+          <div class="empty">${ui.suggestionsEmptyInitial}</div>
         </div>
       </div>
 
       <div id="view-items" class="view">
         <div class="view-header">
-          <h2 class="view-title">Saved Items</h2>
+          <h2 class="view-title">${ui.savedItemsHeading}</h2>
         </div>
-        <div class="filter-bar">
-          <input id="itemSearch" placeholder="Search..." class="filter-search" />
+        <div class="items-search-shell">
+          <input id="itemSearch" placeholder="${ui.searchPlaceholder}" class="filter-search" />
+        </div>
+        <div class="items-chip-strip" id="itemQuickFilters">
+          <button class="filter-chip active" data-type="" data-archived="hide">${ui.filterAll}</button>
+          <button class="filter-chip" data-type="task" data-archived="hide">${ui.filterTasks}</button>
+          <button class="filter-chip" data-type="idea" data-archived="hide">${ui.filterIdeas}</button>
+          <button class="filter-chip" data-type="reference" data-archived="hide">${ui.filterReferences}</button>
+          <button class="filter-chip" data-archived="only">${ui.filterArchived}</button>
+        </div>
+        <details class="mobile-filter-details">
+          <summary>${ui.moreFilters}</summary>
+          <div class="filter-bar">
           <select id="itemSort" class="filter-select">
-            <option value="updated_at_desc">Updated newest</option>
-            <option value="updated_at_asc">Updated oldest</option>
-            <option value="created_at_desc">Created newest</option>
-            <option value="created_at_asc">Created oldest</option>
-            <option value="due_date_asc">Due soonest</option>
-            <option value="follow_up_date_asc">Follow-up soonest</option>
-            <option value="type_asc">Type</option>
-            <option value="status_asc">Status</option>
+            <option value="updated_at_desc">${ui.sortUpdatedNewest}</option>
+            <option value="updated_at_asc">${ui.sortUpdatedOldest}</option>
+            <option value="created_at_desc">${ui.sortCreatedNewest}</option>
+            <option value="created_at_asc">${ui.sortCreatedOldest}</option>
+            <option value="due_date_asc">${ui.sortDueSoonest}</option>
+            <option value="follow_up_date_asc">${ui.sortFollowUpSoonest}</option>
+            <option value="type_asc">${ui.sortType}</option>
+            <option value="status_asc">${ui.sortStatus}</option>
           </select>
           <select id="itemTypeFilter" class="filter-select">
-            <option value="">All types</option>
+            <option value="">${ui.allTypes}</option>
             <option value="task">task</option>
             <option value="exploration">exploration</option>
             <option value="idea">idea</option>
             <option value="reference">reference</option>
           </select>
           <select id="itemStatusFilter" class="filter-select">
-            <option value="">All statuses</option>
+            <option value="">${ui.allStatuses}</option>
             <option value="ready">ready</option>
             <option value="open">open</option>
             <option value="saved">saved</option>
@@ -1123,26 +1578,27 @@ const APP_HTML = `<!doctype html>
             <option value="archived">archived</option>
           </select>
           <select id="itemArchivedFilter" class="filter-select">
-            <option value="hide">Hide archived</option>
-            <option value="show">Show archived</option>
-            <option value="only">Archived only</option>
+            <option value="hide">${ui.hideArchived}</option>
+            <option value="show">${ui.showArchived}</option>
+            <option value="only">${ui.archivedOnly}</option>
           </select>
-          <button id="clearItemFiltersBtn" class="subtle-btn">Clear</button>
-        </div>
+          <button id="clearItemFiltersBtn" class="subtle-btn">${ui.clear}</button>
+          </div>
+        </details>
         <div id="items" class="stack"></div>
       </div>
 
       <div id="view-memory" class="view">
         <div class="view-header">
-          <h2 class="view-title">Memory</h2>
+          <h2 class="view-title">${ui.memoryHeading}</h2>
         </div>
         <div class="memory-input-area">
-          <textarea id="memoryText" class="memory-input" placeholder="Add a memory..."></textarea>
+          <textarea id="memoryText" class="memory-input" placeholder="${ui.memoryInputPlaceholder}"></textarea>
           <div class="controls">
-            <button id="addMemoryBtn" class="secondary">+ Add Memory</button>
+            <button id="addMemoryBtn" class="secondary">${ui.addMemoryButtonMain}</button>
             <label class="checkbox-row">
               <input id="showArchivedMemory" type="checkbox" />
-              Show archived
+              ${ui.showArchived}
             </label>
           </div>
         </div>
@@ -1151,7 +1607,7 @@ const APP_HTML = `<!doctype html>
 
       <div id="view-pending" class="view">
         <div class="view-header">
-          <h2 class="view-title">Pending Review</h2>
+          <h2 class="view-title">${ui.pendingReviewHeading}</h2>
         </div>
         <div id="pendingDumps" class="stack"></div>
       </div>
@@ -1159,6 +1615,9 @@ const APP_HTML = `<!doctype html>
   </div>
 
   <script>
+    const UI = ${uiJson};
+    const t = (key) => UI[key] ?? key;
+
     if ("serviceWorker" in navigator && window.isSecureContext) {
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
@@ -1210,7 +1669,11 @@ const APP_HTML = `<!doctype html>
     $("itemStatusFilter").addEventListener("change", loadItems);
     $("itemArchivedFilter").addEventListener("change", loadItems);
     $("clearItemFiltersBtn").addEventListener("click", clearItemFilters);
+    document.querySelectorAll("#itemQuickFilters .filter-chip").forEach((button) => {
+      button.addEventListener("click", () => applyQuickItemFilter(button));
+    });
 
+    initializeResponsiveUi();
     loadItems();
     loadPendingDumps();
     loadMemory();
@@ -1225,11 +1688,11 @@ const APP_HTML = `<!doctype html>
       clearError();
       const rawText = $("rawText").value.trim();
       if (!rawText) {
-        showError("Enter a memo dump first.");
+        showError(t("errorEnterMemoDumpFirst"));
         return;
       }
 
-      setBusy("Saving dump...", { disableGenerationSettings: true });
+      setBusy(t("busySavingDump"), { disableGenerationSettings: true });
       try {
         await requestJson("/api/dumps", {
           method: "POST",
@@ -1258,16 +1721,16 @@ const APP_HTML = `<!doctype html>
     async function generateSuggestions(settings = {}) {
       clearError();
       const rawText = (settings.rawText ?? $("rawText").value).trim();
-      const parser = settings.parser ?? $("parser").value;
+      const parser = settings.parser ?? "llm";
       const useMemory = settings.useMemory ?? $("useMemory").checked;
       const useContext = settings.useContext ?? $("useContext").checked;
       if (!rawText) {
-        showError("Enter a memo dump first.");
+        showError(t("errorEnterMemoDumpFirst"));
         return;
       }
 
       state.rawText = rawText;
-      setBusy("Generating suggestions...", { disableGenerationSettings: true });
+      setBusy(t("busyGeneratingSuggestions"), { disableGenerationSettings: true });
       try {
         const result = await requestJson("/api/suggestions", {
           method: "POST",
@@ -1303,6 +1766,7 @@ const APP_HTML = `<!doctype html>
       try {
         const result = await requestJson("/api/items" + itemQueryString());
         state.items = result.items || [];
+        syncQuickItemFilters();
         renderItems();
         updateSidebarBadges();
       } catch (error) {
@@ -1326,11 +1790,11 @@ const APP_HTML = `<!doctype html>
       clearError();
       const text = $("memoryText").value.trim();
       if (!text) {
-        showError("Enter memory text first.");
+        showError(t("errorEnterMemoryTextFirst"));
         return;
       }
 
-      setBusy("Saving memory...");
+      setBusy(t("busySavingMemory"));
       try {
         await requestJson("/api/memory", {
           method: "POST",
@@ -1347,7 +1811,7 @@ const APP_HTML = `<!doctype html>
 
     function renderMemory() {
       if (state.memory.length === 0) {
-        memoryListEl.innerHTML = '<div class="empty">No memory entries yet.</div>';
+        memoryListEl.innerHTML = '<div class="empty">' + escapeHtml(t("emptyNoMemoryEntries")) + '</div>';
         return;
       }
 
@@ -1356,25 +1820,24 @@ const APP_HTML = `<!doctype html>
         const wrap = document.createElement("div");
         wrap.className = "compact-row" + (entry.archived_at ? " archived" : "");
         const isEditing = state.editingMemoryId === entry.id;
-        const truncatedText = entry.text.length > 80 ? entry.text.substring(0, 80) + "..." : entry.text;
         wrap.innerHTML = \`
           <div class="compact-row-main">
-            <span class="compact-row-text">\${escapeHtml(truncatedText)}</span>
+            <span class="compact-row-text memory-row-text">\${escapeHtml(entry.text)}</span>
             <span class="compact-row-meta">
-              \${entry.archived_at ? '<span class="pill">archived</span>' : '<span class="pill status-active">active</span>'}
+              \${entry.archived_at ? '<span class="pill">' + escapeHtml(t("archived")) + '</span>' : '<span class="pill status-active">' + escapeHtml(t("active")) + '</span>'}
               <span class="compact-row-date">\${escapeHtml(formatDate(entry.updated_at))}</span>
             </span>
             <div class="compact-row-actions">
-              <button class="subtle-btn" data-action="edit">\${isEditing ? "Close" : "Edit"}</button>
-              <button class="subtle-btn" data-action="archive" \${entry.archived_at ? "disabled" : ""}>Archive</button>
+              <button class="subtle-btn" data-action="edit">\${isEditing ? escapeHtml(t("close")) : escapeHtml(t("edit"))}</button>
+              <button class="subtle-btn" data-action="archive" \${entry.archived_at ? "disabled" : ""}>\${escapeHtml(t("archive"))}</button>
             </div>
           </div>
           \${isEditing ? \`
             <div class="compact-row-editor">
               <textarea class="memory-edit" data-memory-text>\${escapeHtml(entry.text)}</textarea>
               <div class="compact-row-editor-actions">
-                <button class="secondary" data-action="save">Save</button>
-                <button class="subtle-btn" data-action="delete">Delete</button>
+                <button class="secondary" data-action="save">\${escapeHtml(t("save"))}</button>
+                <button class="subtle-btn" data-action="delete">\${escapeHtml(t("delete"))}</button>
               </div>
             </div>
           \` : ""}
@@ -1394,11 +1857,11 @@ const APP_HTML = `<!doctype html>
       clearError();
       const text = card.querySelector("[data-memory-text]").value.trim();
       if (!text) {
-        showError("Memory text cannot be empty.");
+        showError(t("errorMemoryTextCannotBeEmpty"));
         return;
       }
 
-      setBusy("Updating memory...");
+      setBusy(t("busyUpdatingMemory"));
       try {
         await requestJson("/api/memory/" + encodeURIComponent(id), {
           method: "PATCH",
@@ -1414,7 +1877,7 @@ const APP_HTML = `<!doctype html>
 
     async function archiveMemoryEntry(id) {
       clearError();
-      setBusy("Archiving memory...");
+      setBusy(t("busyArchivingMemory"));
       try {
         await requestJson("/api/memory/" + encodeURIComponent(id) + "/archive", {
           method: "POST",
@@ -1430,7 +1893,7 @@ const APP_HTML = `<!doctype html>
 
     async function deleteMemoryEntry(id) {
       clearError();
-      setBusy("Deleting memory...");
+      setBusy(t("busyDeletingMemory"));
       try {
         await requestJson("/api/memory/" + encodeURIComponent(id), {
           method: "DELETE",
@@ -1470,9 +1933,44 @@ const APP_HTML = `<!doctype html>
       loadItems();
     }
 
+    function applyQuickItemFilter(button) {
+      $("itemTypeFilter").value = button.dataset.type || "";
+      $("itemArchivedFilter").value = button.dataset.archived || "hide";
+      loadItems();
+    }
+
+    function syncQuickItemFilters() {
+      const currentType = $("itemTypeFilter").value || "";
+      const currentArchived = $("itemArchivedFilter").value || "hide";
+      document.querySelectorAll("#itemQuickFilters .filter-chip").forEach((button) => {
+        const matchesType = (button.dataset.type || "") === currentType;
+        const matchesArchived = (button.dataset.archived || "hide") === currentArchived;
+        button.classList.toggle("active", matchesType && matchesArchived);
+      });
+    }
+
+    function initializeResponsiveUi() {
+      const itemFilters = document.querySelector(".mobile-filter-details");
+      if (!itemFilters) return;
+      if (window.innerWidth > 900) {
+        itemFilters.setAttribute("open", "");
+        return;
+      }
+      const hasActiveAdvancedFilters =
+        $("itemStatusFilter").value !== "" ||
+        $("itemSort").value !== "updated_at_desc" ||
+        $("itemArchivedFilter").value !== "hide" ||
+        $("itemTypeFilter").value !== "";
+      if (hasActiveAdvancedFilters) {
+        itemFilters.setAttribute("open", "");
+      } else {
+        itemFilters.removeAttribute("open");
+      }
+    }
+
     function renderPendingDumps() {
       if (state.pendingDumps.length === 0) {
-        pendingDumpsEl.innerHTML = '<div class="empty">No pending dumps.</div>';
+        pendingDumpsEl.innerHTML = '<div class="empty">' + escapeHtml(t("emptyNoPendingDumps")) + '</div>';
         updateSidebarBadges();
         return;
       }
@@ -1486,22 +1984,18 @@ const APP_HTML = `<!doctype html>
         const reviewSetupHtml = expanded
           ? '<div class="review-setup-panel">' +
               '<div class="card">' +
-                '<div class="row-title">Review with</div>' +
+                '<div class="row-title">' + escapeHtml(t("reviewDump")) + '</div>' +
                 '<div class="controls">' +
-                  '<select data-review-parser class="parser" aria-label="Review parser">' +
-                    '<option value="stub">stub</option>' +
-                    '<option value="llm">llm</option>' +
-                  '</select>' +
                   '<label class="checkbox-row">' +
                     '<input data-review-memory type="checkbox" />' +
-                    'Use memory' +
+                    escapeHtml(t("useMemory")) +
                   '</label>' +
                   '<label class="checkbox-row">' +
                     '<input data-review-context type="checkbox" />' +
-                    'Use context' +
+                    escapeHtml(t("useContext")) +
                   '</label>' +
-                  '<button data-action="generate-review">Generate review</button>' +
-                  '<button class="secondary" data-action="cancel-review-setup">Cancel</button>' +
+                  '<button data-action="generate-review">' + escapeHtml(t("generateReview")) + '</button>' +
+                  '<button class="secondary" data-action="cancel-review-setup">' + escapeHtml(t("cancel")) + '</button>' +
                 '</div>' +
               '</div>' +
             '</div>'
@@ -1514,8 +2008,8 @@ const APP_HTML = `<!doctype html>
               <span class="compact-row-date">\${escapeHtml(formatDate(dump.created_at))}</span>
             </span>
             <div class="compact-row-actions">
-              <button class="secondary" data-action="review">Review</button>
-              <button class="subtle-btn" data-action="ignore">Ignore</button>
+              <button class="secondary" data-action="review">\${escapeHtml(t("review"))}</button>
+              <button class="subtle-btn" data-action="ignore">\${escapeHtml(t("ignore"))}</button>
             </div>
           </div>
           \${reviewSetupHtml}
@@ -1523,10 +2017,9 @@ const APP_HTML = `<!doctype html>
         wrap.querySelector('[data-action="review"]').addEventListener("click", () => showPendingReviewSetup(dump.id));
         wrap.querySelector('[data-action="ignore"]').addEventListener("click", () => ignorePendingDump(dump.id));
         wrap.querySelector('[data-action="generate-review"]')?.addEventListener("click", () => {
-          const parser = wrap.querySelector("[data-review-parser]").value;
           const useMemory = wrap.querySelector("[data-review-memory]").checked;
           const useContext = wrap.querySelector("[data-review-context]").checked;
-          startPendingDumpReview(dump, { parser, useMemory, useContext });
+          startPendingDumpReview(dump, { parser: "llm", useMemory, useContext });
         });
         wrap.querySelector('[data-action="cancel-review-setup"]')?.addEventListener("click", () => {
           state.reviewSetupDumpId = null;
@@ -1569,14 +2062,14 @@ const APP_HTML = `<!doctype html>
         <div class="card">
           <div class="row-head">
             <div>
-              <div class="row-title">Reviewing pending dump</div>
+              <div class="row-title">\${escapeHtml(t("reviewingPendingDump"))}</div>
               <div class="source">\${escapeHtml(state.reviewingDump.raw_text)}</div>
             </div>
-            <span class="pill">in review</span>
+            <span class="pill">\${escapeHtml(t("inReview"))}</span>
           </div>
           <div class="actions">
-            <button class="secondary" data-action="review-later">Review later</button>
-            <button class="danger" data-action="abandon">Abandon</button>
+            <button class="secondary" data-action="review-later">\${escapeHtml(t("reviewLater"))}</button>
+            <button class="danger" data-action="abandon">\${escapeHtml(t("abandon"))}</button>
           </div>
         </div>
       \`;
@@ -1593,14 +2086,14 @@ const APP_HTML = `<!doctype html>
       }
       renderPendingDumps();
       switchView("pending");
-      setStatus("Returned dump to pending review.");
+      setStatus(t("returnedDumpToPendingReview"));
     }
 
     async function abandonCurrentDump() {
       if (!state.reviewingDumpId) return;
       const dumpId = state.reviewingDumpId;
       clearError();
-      setBusy("Abandoning review...");
+      setBusy(t("busyAbandoningReview"));
       let abandoned = false;
       try {
         await requestJson("/api/dumps/" + encodeURIComponent(dumpId) + "/ignore", {
@@ -1616,7 +2109,7 @@ const APP_HTML = `<!doctype html>
         setBusy("");
       }
       if (abandoned) {
-        setStatus("Abandoned pending dump.");
+        setStatus(t("abandonedPendingDump"));
         switchView("pending");
       }
     }
@@ -1640,7 +2133,7 @@ const APP_HTML = `<!doctype html>
 
     async function ignorePendingDump(id) {
       clearError();
-      setBusy("Ignoring dump...");
+      setBusy(t("busyIgnoringDump"));
       try {
         await requestJson("/api/dumps/" + encodeURIComponent(id) + "/ignore", {
           method: "POST",
@@ -1662,13 +2155,13 @@ const APP_HTML = `<!doctype html>
 
     function renderSuggestions() {
       if (state.suggestions.length === 0) {
-        suggestionsEl.innerHTML = '<div class="empty">No suggestions yet.</div>';
+        suggestionsEl.innerHTML = '<div class="empty">' + escapeHtml(t("emptyNoSuggestionsYet")) + '</div>';
         return;
       }
 
       const visibleSuggestions = state.suggestions.filter((_, index) => !state.approved.has(index) && !state.rejected.has(index));
       if (visibleSuggestions.length === 0) {
-        suggestionsEl.innerHTML = '<div class="empty">No suggestions left to review.</div>';
+        suggestionsEl.innerHTML = '<div class="empty">' + escapeHtml(t("emptyNoSuggestionsLeft")) + '</div>';
         return;
       }
 
@@ -1677,7 +2170,7 @@ const APP_HTML = `<!doctype html>
       state.suggestions.forEach((suggestion, index) => {
         if (state.approved.has(index) || state.rejected.has(index)) return;
         const card = document.createElement("div");
-        card.className = "card";
+        card.className = "card suggestion-card";
         card.dataset.index = String(index);
         const fields = suggestion.suggested_fields || {};
         const related = relatedExistingItemsFor(suggestion);
@@ -1687,48 +2180,50 @@ const APP_HTML = `<!doctype html>
           }
         });
         const disabled = state.rejected.has(index) || state.approved.has(index);
-        const approveLabel = related.length > 0 ? "Create new anyway" : "Approve";
+        const approveLabel = related.length > 0 ? t("createNewAnyway") : t("approve");
 
         card.innerHTML = \`
           <div class="meta">
-            <span class="pill">confidence \${escapeHtml(String(suggestion.confidence ?? ""))}</span>
-            <span class="pill">clarify \${suggestion.needs_clarification ? "yes" : "no"}</span>
+            <span class="pill">\${escapeHtml(t("confidence"))} \${escapeHtml(String(suggestion.confidence ?? ""))}</span>
+            <span class="pill">\${escapeHtml(t("clarify"))} \${suggestion.needs_clarification ? escapeHtml(t("yes")) : escapeHtml(t("no"))}</span>
           </div>
-          <div class="grid">
-            <label>Type
+          <div class="grid suggestion-primary-grid">
+            <label>\${escapeHtml(t("labelType"))}
               <select data-field="type" \${disabled ? "disabled" : ""}>
                 \${typeOptions(suggestion.type)}
               </select>
             </label>
-            <label>Status
-              <input data-field="status" value="\${escapeAttr(suggestion.status || "")}" \${disabled ? "disabled" : ""} />
+            <label>\${escapeHtml(t("labelStatus"))}
+              <select data-field="status" \${disabled ? "disabled" : ""}>
+                \${statusOptions(suggestion.status || "", { includeClarify: true })}
+              </select>
             </label>
           </div>
-          <label>Title
+          <label>\${escapeHtml(t("labelTitle"))}
             <input data-field="title" value="\${escapeAttr(suggestion.title || "")}" \${disabled ? "disabled" : ""} />
           </label>
-          <label>Description
+          <label>\${escapeHtml(t("labelDescription"))}
             <textarea data-field="description" \${disabled ? "disabled" : ""}>\${escapeHtml(suggestion.description || "")}</textarea>
           </label>
-          \${suggestion.clarification_question ? '<div class="source">Clarification: ' + escapeHtml(suggestion.clarification_question) + '</div>' : ""}
-          \${suggestion.missing_context?.length ? '<div class="source">Missing: ' + escapeHtml(suggestion.missing_context.join("; ")) + '</div>' : ""}
-          <div class="grid">
-            <label>Due date
-              <input data-field="due_date" value="\${escapeAttr(fields.due_date || "")}" \${disabled ? "disabled" : ""} />
+          \${suggestion.clarification_question ? '<div class="source">' + escapeHtml(t("clarificationPrefix")) + escapeHtml(suggestion.clarification_question) + '</div>' : ""}
+          \${suggestion.missing_context?.length ? '<div class="source">' + escapeHtml(t("missingPrefix")) + escapeHtml(suggestion.missing_context.join("; ")) + '</div>' : ""}
+          <div class="grid suggestion-secondary-grid">
+            <label>\${escapeHtml(t("labelDueDate"))}
+              <input type="date" data-field="due_date" value="\${escapeAttr(fields.due_date || "")}" \${disabled ? "disabled" : ""} />
             </label>
-            <label>Waiting on
+            <label>\${escapeHtml(t("labelWaitingOn"))}
               <input data-field="waiting_on" value="\${escapeAttr(fields.waiting_on || "")}" \${disabled ? "disabled" : ""} />
             </label>
-            <label>Tags
+            <label>\${escapeHtml(t("labelTags"))}
               <input data-field="tags" value="\${escapeAttr((fields.tags || []).join(","))}" \${disabled ? "disabled" : ""} />
             </label>
-            <label>Category
+            <label>\${escapeHtml(t("labelCategory"))}
               <input data-field="category" value="\${escapeAttr(fields.category || "")}" \${disabled ? "disabled" : ""} />
             </label>
-            <label>URL
+            <label>\${escapeHtml(t("labelUrl"))}
               <input data-field="url" value="\${escapeAttr(fields.url || "")}" \${disabled ? "disabled" : ""} />
             </label>
-            <label>Follow up
+            <label>\${escapeHtml(t("labelFollowUp"))}
               <select data-field="follow_up_needed" \${disabled ? "disabled" : ""}>
                 <option value="" \${fields.follow_up_needed == null ? "selected" : ""}></option>
                 <option value="true" \${fields.follow_up_needed === true ? "selected" : ""}>true</option>
@@ -1739,10 +2234,10 @@ const APP_HTML = `<!doctype html>
           \${relatedExistingHtml(related)}
           \${existingItemEditorHtml(index)}
           <div class="actions">
-            <button data-action="approve" \${disabled ? "disabled" : ""}>\${approveLabel}</button>
-            <button class="danger" data-action="reject" \${disabled ? "disabled" : ""}>\${related.length > 0 ? "Discard" : "Reject"}</button>
-            \${state.approved.has(index) ? '<span class="pill">saved</span>' : ""}
-            \${state.rejected.has(index) ? '<span class="pill">rejected</span>' : ""}
+            <button data-action="approve" \${disabled ? "disabled" : ""}>\${escapeHtml(approveLabel)}</button>
+            <button class="danger" data-action="reject" \${disabled ? "disabled" : ""}>\${related.length > 0 ? escapeHtml(t("discard")) : escapeHtml(t("reject"))}</button>
+            \${state.approved.has(index) ? '<span class="pill">' + escapeHtml(t("saved")) + '</span>' : ""}
+            \${state.rejected.has(index) ? '<span class="pill">' + escapeHtml(t("rejected")) + '</span>' : ""}
           </div>
         \`;
 
@@ -1781,17 +2276,17 @@ const APP_HTML = `<!doctype html>
       if (related.length === 0) return "";
 
       return '<div class="card">' +
-        '<div class="row-title">Looks related to existing item</div>' +
+        '<div class="row-title">' + escapeHtml(t("relatedExistingItem")) + '</div>' +
         related.map((item) => {
           const existingItem = state.relatedItems[item.item_id];
-          const itemTitle = existingItem?.title || "Loading existing item...";
+          const itemTitle = existingItem?.title || t("loadingExistingItem");
           return (
           '<div class="source">' +
             '<strong>' + escapeHtml(itemTitle) + '</strong> · ' +
             escapeHtml(item.relationship) + ' · confidence ' + escapeHtml(String(item.confidence ?? "")) +
             '<br />' + escapeHtml(item.reason || "") +
             '<div class="actions">' +
-              '<button class="secondary" data-action="update-existing" data-item-id="' + escapeAttr(item.item_id) + '">Update existing instead</button>' +
+              '<button class="secondary" data-action="update-existing" data-item-id="' + escapeAttr(item.item_id) + '">' + escapeHtml(t("updateExistingInstead")) + '</button>' +
             '</div>' +
           '</div>'
           );
@@ -1826,31 +2321,31 @@ const APP_HTML = `<!doctype html>
 
       const item = edit.item;
       return '<div class="card">' +
-        '<div class="row-title">Update existing item manually</div>' +
-        '<div class="source">No new item will be created. Use the suggestion/raw dump as reference and edit the existing item yourself.</div>' +
+        '<div class="row-title">' + escapeHtml(t("updateExistingManually")) + '</div>' +
+        '<div class="source">' + escapeHtml(t("updateExistingManualNote")) + '</div>' +
         '<div class="grid">' +
-          '<label>Type<select data-existing-field="type">' + itemTypeOptions(item.type) + '</select></label>' +
-          '<label>Status<input data-existing-field="status" value="' + escapeAttr(item.status || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelType")) + '<select data-existing-field="type">' + itemTypeOptions(item.type) + '</select></label>' +
+          '<label>' + escapeHtml(t("labelStatus")) + '<select data-existing-field="status">' + statusOptions(item.status || "") + '</select></label>' +
         '</div>' +
-        '<label>Title<input data-existing-field="title" value="' + escapeAttr(item.title || "") + '" /></label>' +
-        '<label>Description<textarea data-existing-field="description">' + escapeHtml(item.description || "") + '</textarea></label>' +
+        '<label>' + escapeHtml(t("labelTitle")) + '<input data-existing-field="title" value="' + escapeAttr(item.title || "") + '" /></label>' +
+        '<label>' + escapeHtml(t("labelDescription")) + '<textarea data-existing-field="description">' + escapeHtml(item.description || "") + '</textarea></label>' +
         '<div class="grid">' +
-          '<label>Due date<input data-existing-field="due_date" value="' + escapeAttr(item.fields?.due_date || "") + '" /></label>' +
-          '<label>Follow-up date<input data-existing-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
-          '<label>Waiting on<input data-existing-field="waiting_on" value="' + escapeAttr(item.fields?.waiting_on || "") + '" /></label>' +
-          '<label>Category<input data-existing-field="category" value="' + escapeAttr(item.fields?.category || "") + '" /></label>' +
-          '<label>URL<input data-existing-field="url" value="' + escapeAttr(item.fields?.url || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelDueDate")) + '<input type="date" data-existing-field="due_date" value="' + escapeAttr(item.fields?.due_date || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelFollowUpDate")) + '<input type="date" data-existing-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelWaitingOn")) + '<input data-existing-field="waiting_on" value="' + escapeAttr(item.fields?.waiting_on || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelCategory")) + '<input data-existing-field="category" value="' + escapeAttr(item.fields?.category || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelUrl")) + '<input data-existing-field="url" value="' + escapeAttr(item.fields?.url || "") + '" /></label>' +
         '</div>' +
         '<div class="actions">' +
-          '<button data-action="save-existing">Save existing item</button>' +
-          '<button class="secondary" data-action="cancel-existing">Cancel</button>' +
+          '<button data-action="save-existing">' + escapeHtml(t("saveExistingItem")) + '</button>' +
+          '<button class="secondary" data-action="cancel-existing">' + escapeHtml(t("cancel")) + '</button>' +
         '</div>' +
       '</div>';
     }
 
     async function openExistingItemEditor(index, itemId) {
       clearError();
-      setBusy("Loading existing item...");
+      setBusy(t("busyLoadingExistingItem"));
       try {
         const item = await requestJson("/api/items/" + encodeURIComponent(itemId));
         if (item?.id) state.relatedItems[item.id] = item;
@@ -1868,7 +2363,7 @@ const APP_HTML = `<!doctype html>
       if (!edit || edit.suggestionIndex !== index || !edit.item) return;
 
       clearError();
-      setBusy("Updating existing item...");
+      setBusy(t("busyUpdatingExistingItem"));
       try {
         await requestJson("/api/items/" + encodeURIComponent(edit.item.id), {
           method: "PATCH",
@@ -1879,7 +2374,7 @@ const APP_HTML = `<!doctype html>
         await loadItems();
         await maybeMarkReviewComplete();
         renderSuggestions();
-        setStatus("Updated existing item.");
+        setStatus(t("updatedExistingItem"));
       } catch (error) {
         showError(error.message);
       } finally {
@@ -1911,9 +2406,9 @@ const APP_HTML = `<!doctype html>
       const approveButton = card.querySelector('[data-action="approve"]');
       if (approveButton) {
         approveButton.disabled = true;
-        approveButton.textContent = "Saving...";
+        approveButton.textContent = t("saving");
       }
-      setBusy("Saving item...");
+      setBusy(t("busySavingItem"));
       let savedTitle = "";
       try {
         const item = await requestJson("/api/items", {
@@ -1922,23 +2417,30 @@ const APP_HTML = `<!doctype html>
             rawText: state.rawText,
             suggestion: original,
             overrides,
+            reviewContext: {
+              source: state.reviewingDumpId ? "pending_review" : "suggestion_review",
+              proposalId: state.reviewingDumpId
+                ? state.reviewingDumpId + ":suggestion:" + index
+                : "suggestion:" + index,
+              dumpId: state.reviewingDumpId || undefined,
+            },
           },
         });
         savedTitle = item.title || overrides.title || original.title || "item";
         state.approved.add(index);
         renderSuggestions();
-        setStatus("Saved item: " + savedTitle);
+        setStatus(t("savedItemPrefix") + savedTitle);
         try {
           await loadItems();
           await maybeMarkReviewComplete();
         } catch (error) {
-          showError("Item was saved, but the pending dump could not be marked reviewed: " + (error instanceof Error ? error.message : String(error)));
+          showError(t("itemSavedButPendingReviewMarkFailedPrefix") + (error instanceof Error ? error.message : String(error)));
         }
         renderSuggestions();
       } catch (error) {
         if (approveButton) {
           approveButton.disabled = false;
-          approveButton.textContent = "Approve";
+          approveButton.textContent = t("approve");
         }
         showError(error.message);
       } finally {
@@ -2019,7 +2521,7 @@ const APP_HTML = `<!doctype html>
 
     function renderItems() {
       if (state.items.length === 0) {
-        itemsEl.innerHTML = '<div class="empty">No saved items yet.</div>';
+        itemsEl.innerHTML = '<div class="empty">' + escapeHtml(t("emptyNoSavedItemsYet")) + '</div>';
         updateSidebarBadges();
         return;
       }
@@ -2031,15 +2533,17 @@ const APP_HTML = `<!doctype html>
         const isEditing = state.editingItemId === item.id;
         wrap.innerHTML = \`
           <div class="compact-row-main">
-            <span class="type-chip">\${escapeHtml(item.type)}</span>
             <span class="compact-row-title">\${escapeHtml(item.title)}</span>
             <span class="compact-row-meta">
-              <span class="pill \${statusPillClass(item.status)}">\${escapeHtml(displayItemStatus(item.status))}</span>
-              <span class="compact-row-date">\${escapeHtml(formatDate(item.updated_at))}</span>
+              <span class="compact-row-date">\${escapeHtml(itemListDateText(item))}</span>
             </span>
             <div class="compact-row-actions">
-              <button class="subtle-btn" data-action="edit">\${isEditing ? "Close" : "Edit"}</button>
-              <button class="subtle-btn" data-action="archive">Archive</button>
+              <span class="compact-row-action-meta">
+                <span class="type-chip">\${escapeHtml(item.type)}</span>
+                <span class="pill \${statusPillClass(item.status)}">\${escapeHtml(displayItemStatus(item.status))}</span>
+              </span>
+              <button class="subtle-btn" data-action="edit">\${isEditing ? escapeHtml(t("close")) : escapeHtml(t("edit"))}</button>
+              <button class="subtle-btn" data-action="\${item.archived_at ? "unarchive" : "archive"}">\${item.archived_at ? escapeHtml(t("unarchive")) : escapeHtml(t("archive"))}</button>
             </div>
           </div>
           \${isEditing ? '<div class="compact-row-editor">' + ledgerItemEditorHtml(item) + '</div>' : ""}
@@ -2053,7 +2557,8 @@ const APP_HTML = `<!doctype html>
           state.editingItemId = null;
           renderItems();
         });
-        wrap.querySelector('[data-action="archive"]').addEventListener("click", () => archiveItem(item.id));
+        wrap.querySelector('[data-action="archive"]')?.addEventListener("click", () => archiveItem(item.id));
+        wrap.querySelector('[data-action="unarchive"]')?.addEventListener("click", () => unarchiveItem(item.id));
         itemsEl.appendChild(wrap);
       });
       updateSidebarBadges();
@@ -2061,28 +2566,28 @@ const APP_HTML = `<!doctype html>
 
     function ledgerItemEditorHtml(item) {
       return '<div class="card">' +
-        '<div class="row-title">Edit item</div>' +
+        '<div class="row-title">' + escapeHtml(t("editItem")) + '</div>' +
         '<div class="grid">' +
-          '<label>Type<select data-ledger-field="type">' + itemTypeOptions(item.type) + '</select></label>' +
-          '<label>Status<input data-ledger-field="status" value="' + escapeAttr(item.status || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelType")) + '<select data-ledger-field="type">' + itemTypeOptions(item.type) + '</select></label>' +
+          '<label>' + escapeHtml(t("labelStatus")) + '<select data-ledger-field="status">' + statusOptions(item.status || "") + '</select></label>' +
         '</div>' +
-        '<label>Title<input data-ledger-field="title" value="' + escapeAttr(item.title || "") + '" /></label>' +
-        '<label>Description<textarea data-ledger-field="description">' + escapeHtml(item.description || "") + '</textarea></label>' +
+        '<label>' + escapeHtml(t("labelTitle")) + '<input data-ledger-field="title" value="' + escapeAttr(item.title || "") + '" /></label>' +
+        '<label>' + escapeHtml(t("labelDescription")) + '<textarea data-ledger-field="description">' + escapeHtml(item.description || "") + '</textarea></label>' +
         '<div class="grid">' +
-          '<label>Due date<input data-ledger-field="due_date" value="' + escapeAttr(item.fields?.due_date || "") + '" /></label>' +
-          '<label>Follow-up date<input data-ledger-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
-          '<label>URL<input data-ledger-field="url" value="' + escapeAttr(item.fields?.url || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelDueDate")) + '<input type="date" data-ledger-field="due_date" value="' + escapeAttr(item.fields?.due_date || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelFollowUpDate")) + '<input type="date" data-ledger-field="follow_up_date" value="' + escapeAttr(item.fields?.follow_up_date || "") + '" /></label>' +
+          '<label>' + escapeHtml(t("labelUrl")) + '<input data-ledger-field="url" value="' + escapeAttr(item.fields?.url || "") + '" /></label>' +
         '</div>' +
         '<div class="actions">' +
-          '<button data-action="save-edit">Save edit</button>' +
-          '<button class="secondary" data-action="cancel-edit">Cancel</button>' +
+          '<button data-action="save-edit">' + escapeHtml(t("saveEdit")) + '</button>' +
+          '<button class="secondary" data-action="cancel-edit">' + escapeHtml(t("cancel")) + '</button>' +
         '</div>' +
       '</div>';
     }
 
     async function saveLedgerItemEdit(id, card) {
       clearError();
-      setBusy("Saving item edit...");
+      setBusy(t("busySavingItemEdit"));
       try {
         await requestJson("/api/items/" + encodeURIComponent(id), {
           method: "PATCH",
@@ -2090,7 +2595,7 @@ const APP_HTML = `<!doctype html>
         });
         state.editingItemId = null;
         await loadItems();
-        setStatus("Updated item.");
+        setStatus(t("updatedItem"));
       } catch (error) {
         showError(error.message);
       } finally {
@@ -2116,7 +2621,7 @@ const APP_HTML = `<!doctype html>
     async function updateItemStatus(id, card) {
       clearError();
       const status = card.querySelector("[data-item-status]").value;
-      setBusy("Updating item...");
+      setBusy(t("busyUpdatingItem"));
       try {
         await requestJson("/api/items/" + encodeURIComponent(id), {
           method: "PATCH",
@@ -2132,9 +2637,25 @@ const APP_HTML = `<!doctype html>
 
     async function archiveItem(id) {
       clearError();
-      setBusy("Archiving item...");
+      setBusy(t("busyArchivingItem"));
       try {
         await requestJson("/api/items/" + encodeURIComponent(id) + "/archive", {
+          method: "POST",
+          body: {},
+        });
+        await loadItems();
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        setBusy("");
+      }
+    }
+
+    async function unarchiveItem(id) {
+      clearError();
+      setBusy(t("busyUnarchivingItem"));
+      try {
+        await requestJson("/api/items/" + encodeURIComponent(id) + "/unarchive", {
           method: "POST",
           body: {},
         });
@@ -2155,7 +2676,7 @@ const APP_HTML = `<!doctype html>
       const text = await response.text();
       const payload = text ? JSON.parse(text) : {};
       if (!response.ok) {
-        throw new Error(payload.error || "Request failed");
+        throw new Error(payload.error || t("requestFailed"));
       }
       return payload;
     }
@@ -2165,7 +2686,6 @@ const APP_HTML = `<!doctype html>
       $("generateBtn").disabled = Boolean(message);
       $("saveLaterBtn").disabled = Boolean(message);
       $("addMemoryBtn").disabled = Boolean(message);
-      $("parser").disabled = Boolean(options.disableGenerationSettings);
       $("useMemory").disabled = Boolean(options.disableGenerationSettings);
       $("useContext").disabled = Boolean(options.disableGenerationSettings);
       $("generationSettings").classList.toggle("disabled", Boolean(options.disableGenerationSettings));
@@ -2186,7 +2706,7 @@ const APP_HTML = `<!doctype html>
     }
 
     function typeOptions(current) {
-      return ["task", "exploration", "idea", "reference", "clarify_needed"].map((type) =>
+      return ["task", "exploration", "idea", "reference"].map((type) =>
         '<option value="' + type + '" ' + (type === current ? "selected" : "") + '>' + type + '</option>'
       ).join("");
     }
@@ -2197,16 +2717,14 @@ const APP_HTML = `<!doctype html>
       ).join("");
     }
 
-    function statusOptions(current) {
-      const statuses = ["ready", "open", "saved", "waiting", "in_progress", "done", "archived"];
+    function statusOptions(current, options = {}) {
+      const statuses = ["ready", "open", "saved", "waiting", "in_progress", "done"];
+      if (options.includeArchived) statuses.push("archived");
+      if (options.includeClarify) statuses.push("needs_clarification");
       if (!statuses.includes(current)) statuses.unshift(current);
       return statuses.map((status) =>
         '<option value="' + escapeAttr(status) + '" ' + (status === current ? "selected" : "") + '>' + escapeHtml(status) + '</option>'
       ).join("");
-    }
-
-    function displayItemStatus(status) {
-      return ["ready", "open", "saved"].includes(status) ? "ready" : status;
     }
 
     function formatDate(isoString) {
@@ -2223,11 +2741,20 @@ const APP_HTML = `<!doctype html>
       } catch { return isoString; }
     }
 
+    function itemListDateText(item) {
+      if (item.fields?.due_date) return "Due " + item.fields.due_date;
+      if (item.fields?.follow_up_date) return "Follow-up " + item.fields.follow_up_date;
+      return "";
+    }
+
+    function displayItemStatus(status) {
+      return ["ready", "open", "saved"].includes(status) ? "ready" : status;
+    }
+
     function statusPillClass(status) {
-      const displayed = displayItemStatus(status);
-      if (displayed === "ready") return "status-active";
-      if (displayed === "waiting" || displayed === "in_progress") return "status-waiting";
-      if (displayed === "done") return "status-done";
+      if (status === "ready" || status === "open" || status === "saved") return "status-active";
+      if (status === "waiting" || status === "in_progress" || status === "needs_clarification") return "status-waiting";
+      if (status === "done") return "status-done";
       return "";
     }
 

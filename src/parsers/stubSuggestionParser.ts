@@ -9,6 +9,7 @@ const IDEA_RE = /\b(maybe|idea|could|should support|feature|someday|later|would 
 const EXPLORATION_RE = /\b(how|why|research|figure out|decide|compare|learn|investigate|look into|explore|should i|whether|can .+ apply)\b|能不能|怎么|是否/i;
 const REFERENCE_RE = /\b(fyi|note|remember|reference|save this|fact:|info:)\b|机会|资产|财富|窗口|基本功/i;
 const BARE_IDEA_RE = /\b(portfolio website|dissertation chatbot|chatbot|website|toolkit|app|project|项目|产品)\b/i;
+type StubClassification = SuggestionType | null;
 
 export const stubSuggestionParser: SuggestionParser = {
   async parse(input: ParseSuggestionInput): Promise<SuggestionResult> {
@@ -44,7 +45,7 @@ function buildSuggestion(chunk: string): Suggestion {
 
   const type = classify(chunk);
   const title = titleCase(cleanTitle(chunk));
-  const needsClarification = type === "clarify_needed";
+  const needsClarification = type === null;
 
   if (needsClarification) {
     return clarifySuggestion(
@@ -81,14 +82,14 @@ function buildSuggestion(chunk: string): Suggestion {
   };
 }
 
-function classify(text: string): SuggestionType {
+function classify(text: string): StubClassification {
   if (URL_RE.test(text)) return "reference";
   if (TASK_RE.test(text)) return "task";
   if (EXPLORATION_RE.test(text)) return "exploration";
   if (IDEA_RE.test(text) || BARE_IDEA_RE.test(text)) return "idea";
   if (REFERENCE_RE.test(text)) return "reference";
   if (URL_IN_TEXT_RE.test(text)) return "reference";
-  return "clarify_needed";
+  return null;
 }
 
 function cleanTitle(text: string): string {
@@ -128,8 +129,6 @@ function descriptionFor(type: SuggestionType, chunk: string): string {
       return `Possible future idea to save: ${chunk}`;
     case "reference":
       return `Reference note to save: ${chunk}`;
-    case "clarify_needed":
-      return `Needs clarification before it can be classified safely: ${chunk}`;
   }
 }
 
@@ -149,13 +148,11 @@ function statusFor(type: SuggestionType): Suggestion["status"] {
     case "idea":
     case "reference":
       return "saved";
-    case "clarify_needed":
-      return "needs_clarification";
   }
 }
 
 function confidenceFor(type: SuggestionType): number {
-  return type === "clarify_needed" ? 0.35 : 0.72;
+  return 0.72;
 }
 
 function categoryFor(type: SuggestionType, text: string): string | null {
@@ -290,7 +287,7 @@ function extractWaitingOn(text: string): string | null {
 
 function clarifySuggestion(title: string, description: string, originalText = "the memo"): Suggestion {
   return {
-    type: "clarify_needed",
+    type: "reference",
     title,
     description,
     status: "needs_clarification",

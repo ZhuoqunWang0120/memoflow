@@ -1,3 +1,15 @@
+import { getUiStrings, serializeSelectedUiStringsForInlineScript, type UiStringKey } from "./i18n/uiStrings.js";
+
+const ui = getUiStrings();
+const captureInlineKeys: UiStringKey[] = [
+  "errorEnterMemoFirst",
+  "errorEnterMemoryTextFirst",
+  "savedDumpSuccess",
+  "savedMemorySuccess",
+  "requestFailed",
+];
+const uiJson = serializeSelectedUiStringsForInlineScript(captureInlineKeys);
+
 export const CAPTURE_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -9,7 +21,7 @@ export const CAPTURE_HTML = `<!doctype html>
   <meta name="apple-mobile-web-app-title" content="MemoFlow" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="format-detection" content="telephone=no" />
-  <title>MemoFlow Capture</title>
+  <title>${ui.capturePageTitle}</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon-180.png" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
@@ -205,8 +217,8 @@ export const CAPTURE_HTML = `<!doctype html>
 <body>
   <main>
     <header>
-      <h1>MemoFlow Capture</h1>
-      <div class="muted">Drop it now. Review later.</div>
+      <h1>${ui.captureHeaderTitle}</h1>
+      <div class="muted">${ui.captureHeaderSubtitle}</div>
     </header>
 
     <div id="error" class="error"></div>
@@ -214,28 +226,31 @@ export const CAPTURE_HTML = `<!doctype html>
 
     <section>
       <div class="postit postit-memo">
-        <span class="postit-label">Quick Memo</span>
-        <textarea id="memoText" placeholder="What's on your mind? Just type and dump..."></textarea>
+        <span class="postit-label">${ui.captureQuickMemo}</span>
+        <textarea id="memoText" placeholder="${ui.captureMemoPlaceholder}"></textarea>
         <div class="controls">
-          <button id="saveDumpBtn">Save for later</button>
+          <button id="saveDumpBtn">${ui.saveForLater}</button>
         </div>
       </div>
     </section>
 
     <section>
       <div class="postit postit-memory">
-        <span class="postit-label">Add Memory</span>
-        <textarea id="memoryText" placeholder="A fact, context, or note for later..."></textarea>
+        <span class="postit-label">${ui.addMemoryLabel}</span>
+        <textarea id="memoryText" placeholder="${ui.captureMemoryPlaceholder}"></textarea>
         <div class="controls">
-          <button id="addMemoryBtn">Add memory</button>
+          <button id="addMemoryBtn">${ui.addMemoryButton}</button>
         </div>
       </div>
     </section>
 
-    <a href="/" class="workspace-link">Open workspace</a>
+    <a href="/" class="workspace-link">${ui.openWorkspace}</a>
   </main>
 
   <script>
+    const UI = ${uiJson};
+    const t = (key) => UI[key] ?? key;
+
     if ("serviceWorker" in navigator && window.isSecureContext) {
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
@@ -252,7 +267,7 @@ export const CAPTURE_HTML = `<!doctype html>
       clearMessages();
       const rawText = document.getElementById("memoText").value.trim();
       if (!rawText) {
-        showError("Enter a memo first.");
+        showError(t("errorEnterMemoFirst"));
         return;
       }
 
@@ -263,7 +278,7 @@ export const CAPTURE_HTML = `<!doctype html>
           body: { rawText },
         });
         document.getElementById("memoText").value = "";
-        showSuccess("Saved dump.");
+        showSuccess(t("savedDumpSuccess"));
       } catch (error) {
         showError(error.message);
       } finally {
@@ -275,7 +290,7 @@ export const CAPTURE_HTML = `<!doctype html>
       clearMessages();
       const text = document.getElementById("memoryText").value.trim();
       if (!text) {
-        showError("Enter memory text first.");
+        showError(t("errorEnterMemoryTextFirst"));
         return;
       }
 
@@ -286,7 +301,7 @@ export const CAPTURE_HTML = `<!doctype html>
           body: { text },
         });
         document.getElementById("memoryText").value = "";
-        showSuccess("Saved memory.");
+        showSuccess(t("savedMemorySuccess"));
       } catch (error) {
         showError(error.message);
       } finally {
@@ -303,7 +318,7 @@ export const CAPTURE_HTML = `<!doctype html>
       const text = await response.text();
       const payload = text ? JSON.parse(text) : {};
       if (!response.ok) {
-        throw new Error(payload.error || "Request failed");
+        throw new Error(payload.error || t("requestFailed"));
       }
       return payload;
     }

@@ -3,6 +3,7 @@ import { createOpenAiSuggestionParser } from "../parsers/openAiSuggestionParser.
 import { stubSuggestionParser } from "../parsers/stubSuggestionParser.js";
 import type { ContextBundle, ParserName, SuggestionParser } from "../parsers/types.js";
 import type { RelatedExistingItem } from "../schemas/suggestion.js";
+import { normalizeSuggestionResult } from "./suggestionNormalizationService.js";
 import {
   createOpenAiSemanticRelationScanner,
   type SemanticRelationScanner,
@@ -41,7 +42,8 @@ export async function createSuggestionsFromDump(
     scanPromise,
   ]);
 
-  const withSemanticRelations = addSemanticScanRelations(result, semanticRelations);
+  const normalized = normalizeSuggestionResult(result);
+  const withSemanticRelations = addSemanticScanRelations(normalized, semanticRelations);
   const withFallback = addDeterministicRelatedFallback(withSemanticRelations, rawText, input.context);
   return SuggestionResultSchema.parse(filterRelatedItemsToContext(withFallback, input.context));
 }

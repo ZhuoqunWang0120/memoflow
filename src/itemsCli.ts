@@ -5,11 +5,12 @@ import { stdin as input, stdout as output } from "node:process";
 import { add, archive, exportCsv, list, update, type AddItemInput, type UpdateItemInput } from "./services/itemStoreService.js";
 import { ItemTypeSchema, type ItemFields, type ItemType } from "./schemas/item.js";
 import { createSuggestionsFromDump } from "./services/suggestionService.js";
-import { suggestionToAddItemInput, type SuggestionApprovalOverrides } from "./services/suggestionApprovalService.js";
+import { type SuggestionApprovalOverrides } from "./services/suggestionApprovalService.js";
 import type { ParserName } from "./parsers/types.js";
 import type { Suggestion } from "./schemas/suggestion.js";
 import { addDump, getDump, ignoreDump, listPending, markReviewed } from "./services/dumpStoreService.js";
 import { ItemSortOptionValues, type ArchivedVisibility, type ItemSortOption } from "./services/itemLedgerQuery.js";
+import { saveReviewedSuggestion } from "./services/reviewedSuggestionSaveService.js";
 
 type ParsedCommand =
   | { command: "list"; archived: ArchivedVisibility; type?: ItemType; status?: string; query?: string; sort?: ItemSortOption }
@@ -157,7 +158,15 @@ async function reviewDump(rawText: string, parser: ParserName, dumpId?: string):
 
         if (action === "a") {
           try {
-            const item = await add(suggestionToAddItemInput({ suggestion, rawText }));
+            const { item } = await saveReviewedSuggestion({
+              rawText,
+              suggestion,
+              reviewContext: {
+                source: "cli_review",
+                proposalId: dumpId ? `${dumpId}:suggestion:${index}` : `cli_review:${index}`,
+                dumpId,
+              },
+            });
             savedItems.push(item);
             console.log(`Saved item: ${item.id}`);
             break;
@@ -170,7 +179,16 @@ async function reviewDump(rawText: string, parser: ParserName, dumpId?: string):
 
         if (action === "e") {
           const overrides = await promptForOverrides(rl, suggestion);
-          const item = await add(suggestionToAddItemInput({ suggestion, rawText, overrides }));
+          const { item } = await saveReviewedSuggestion({
+            rawText,
+            suggestion,
+            overrides,
+            reviewContext: {
+              source: "cli_review",
+              proposalId: dumpId ? `${dumpId}:suggestion:${index}` : `cli_review:${index}`,
+              dumpId,
+            },
+          });
           savedItems.push(item);
           console.log(`Saved item: ${item.id}`);
           break;
@@ -288,8 +306,7 @@ async function promptForOverrides(
   rl: ReturnType<typeof createInterface>,
   suggestion: Suggestion,
 ): Promise<SuggestionApprovalOverrides> {
-  const defaultType = suggestion.type === "clarify_needed" ? "" : suggestion.type;
-  const typeValue = await askWithDefault(rl, "Type", defaultType);
+  const typeValue = await askWithDefault(rl, "Type", suggestion.type);
   const type = typeValue ? parseItemType(typeValue) : undefined;
   const title = await askWithDefault(rl, "Title", suggestion.title);
   const description = await askWithDefault(rl, "Description", suggestion.description ?? "");

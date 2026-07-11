@@ -112,6 +112,18 @@ export async function archive(id: string, options: ItemStoreOptions = {}): Promi
   return update(id, { status: "archived", archived_at: now }, options);
 }
 
+export async function unarchive(id: string, options: ItemStoreOptions = {}): Promise<Item> {
+  const existing = await get(id, options);
+  return update(
+    id,
+    {
+      archived_at: null,
+      status: existing.status === "archived" ? defaultStatusForType(existing.type) : existing.status,
+    },
+    options,
+  );
+}
+
 export async function exportCsv(options: ListItemsOptions = {}): Promise<string> {
   const items = await list(options);
   const headers = [
