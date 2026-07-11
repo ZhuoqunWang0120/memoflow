@@ -1,5 +1,177 @@
 # Change Log
 
+## 2026-07-11
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: fix the native XCTest source import after the app module name changed to match the Xcode target name
+- Summary of changes:
+  - changed the native test source from `@testable import MemoFlow` to `@testable import MemoFlowIOS`
+- Files changed:
+  - `apps/ios/MemoFlowIOSTests/CaptureViewModelTests.swift`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `npm run build` -> pending
+  - `npm run check` -> pending
+  - `npm run eval:native-guards` -> pending
+  - `npm run eval:smoke` -> pending
+- Decisions made:
+  - align the XCTest import with the actual app target/module name instead of trying to preserve the old module alias
+- Risks or follow-ups:
+  - Xcode GUI still needs to re-run the test target to confirm there are no further native-test compilation issues
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: fix the native XCTest bundle configuration so the test target can generate its own Info.plist
+- Summary of changes:
+  - added `GENERATE_INFOPLIST_FILE: YES` to the `MemoFlowIOSTests` target in the iOS project spec
+  - regenerated the iOS project so the test target now carries generated Info.plist settings in both Debug and Release
+- Files changed:
+  - `apps/ios/project.yml`
+  - `apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `./scripts/generate_ios_project.sh` -> passed
+  - `rg -n "MemoFlowIOSTests|GENERATE_INFOPLIST_FILE|INFOPLIST_FILE" apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj -S` -> confirmed `MemoFlowIOSTests` has `GENERATE_INFOPLIST_FILE = YES`
+  - `npm run build` -> pending
+  - `npm run check` -> pending
+  - `npm run eval:native-guards` -> pending
+  - `npm run eval:smoke` -> pending
+- Decisions made:
+  - generate the test bundle Info.plist automatically instead of adding and maintaining a separate plist file for the test target
+- Risks or follow-ups:
+  - Xcode GUI still needs to re-run the test target to confirm the new configuration resolves the prior signing/build error
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: fix the native XCTest host-app naming mismatch so the new iOS test target can resolve its test host
+- Summary of changes:
+  - removed the shared top-level `PRODUCT_NAME` override from the iOS project spec
+  - regenerated the iOS project so the app target resolves `PRODUCT_NAME` from `$(TARGET_NAME)`
+  - preserved the generated `TEST_HOST = $(BUILT_PRODUCTS_DIR)/MemoFlowIOS.app/MemoFlowIOS` path so it matches the actual app target output
+- Files changed:
+  - `apps/ios/project.yml`
+  - `apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `./scripts/generate_ios_project.sh` -> passed
+  - `rg -n "PRODUCT_NAME =|TEST_HOST =|MemoFlowIOS.app|MemoFlow.app" apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj -S` -> confirmed `TEST_HOST` points at `MemoFlowIOS.app/MemoFlowIOS` and shared configs now use `PRODUCT_NAME = "$(TARGET_NAME)"`
+  - `npm run build` -> pending
+  - `npm run check` -> pending
+  - `npm run eval:native-guards` -> pending
+  - `npm run eval:smoke` -> pending
+- Decisions made:
+  - prefer fixing the project-spec naming source instead of hardcoding test-target host paths by hand in the generated project
+- Risks or follow-ups:
+  - XCTest execution still needs to be re-run in Xcode GUI to confirm the host-resolution error is gone
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: add regression coverage for the native approval-flow bugs found during simulator validation
+- Summary of changes:
+  - added a native unit-test target `MemoFlowIOSTests`
+  - added approval/save view-model tests covering item creation, dump review marking, and stable-ID discard behavior
+  - added `npm run eval:native-guards` to catch the specific Capture view wiring regressions fixed during this session
+  - updated the native README to document the new regression coverage
+- Files changed:
+  - `apps/ios/project.yml`
+  - `apps/ios/MemoFlowIOSTests/CaptureViewModelTests.swift`
+  - `apps/ios/README.md`
+  - `src/eval/runNativeGuardEval.ts`
+  - `package.json`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `sed -n '1,220p' apps/ios/project.yml` -> reviewed current generated-project target setup
+  - `sed -n '1,240p' package.json` -> reviewed current eval script layout
+  - `./scripts/generate_ios_project.sh` -> passed
+  - `xcodebuild -list -project apps/ios/MemoFlowIOS.xcodeproj` -> passed; project now includes `MemoFlowIOSTests`
+  - `npm run build` -> passed
+  - `npm run check` -> passed
+  - `npm run eval:native-guards` -> passed, `4/4`
+  - `npm run eval:smoke` -> passed, `5/5`
+- Decisions made:
+  - add native unit tests for deterministic approval/save logic instead of relying only on manual simulator checks
+  - add a narrow source guard eval for the exact UI wiring regressions because terminal-native UI testing is not available in this session
+- Risks or follow-ups:
+  - native XCTest execution still needs to happen in Xcode GUI or a less restricted shell because this session has simulator and Swift macro sandbox limits
+  - the source guard eval is intentionally narrow and protects wiring, not full end-to-end native runtime behavior
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: prevent the native suggestion type picker from interfering with approval taps during simulator review
+- Summary of changes:
+  - changed the native suggestion type picker in the capture review card to explicit menu style
+  - changed suggestion approval and discard to use stable suggestion IDs instead of array indices during SwiftUI list updates
+  - switched to the Items tab immediately after a successful native approval so saved-item visibility is immediate during runtime validation
+- Files changed:
+  - `apps/ios/MemoFlowIOS/Views/CaptureView.swift`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `rg -n "Approve|Picker|suggestion.type" apps/ios/MemoFlowIOS -S` -> traced approval and type-selection controls to `CaptureView.swift`
+  - `sed -n '1,320p' apps/ios/MemoFlowIOS/Views/CaptureView.swift` -> confirmed the default picker style inside the suggestion editor card
+  - user simulator report: `Thread 1: Fatal error: Index out of range` after tapping `Approve`
+  - `npm run build` -> pending
+  - `npm run check` -> pending
+  - `npm run eval:smoke` -> pending
+- Decisions made:
+  - keep the `.menu` picker style so type selection remains available without hijacking row taps
+  - switch suggestion row identity and actions to stable IDs because removing by array index during list rendering was causing the native crash
+  - move to the Items tab after approval because the current runtime validation goal is confirming that approved suggestions are actually saved and queryable
+- Risks or follow-ups:
+  - simulator retest is still needed to confirm the approval button now behaves correctly
+  - if the Items tab is still empty after this change, the next suspects are SwiftData save behavior or runtime save errors rather than row-index invalidation
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: realign the generated iOS project with the upgraded macOS/Xcode toolchain and recheck native build status
+- Summary of changes:
+  - removed the old Xcode 15-era project-format downgrade from the iOS project generator
+  - regenerated the checked-in iOS project so it now keeps XcodeGen's native `objectVersion = 77` and `preferredProjectObjectVersion = 77`
+  - rechecked native CLI build behavior under Xcode `26.6` with an explicit writable derived-data path
+- Files changed:
+  - `scripts/generate_ios_project.sh`
+  - `apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `xcodebuild -version` -> `Xcode 26.6`, `Build version 17F113`
+  - `sw_vers` -> `macOS 26.5.2`
+  - `xcodebuild -list -project apps/ios/MemoFlowIOS.xcodeproj` -> passed
+  - `xcodebuild -showdestinations -project apps/ios/MemoFlowIOS.xcodeproj -scheme MemoFlowIOS` -> passed; listed `Any iOS Device`, `Any iOS Simulator Device`, and `My Mac`
+  - `xcodebuild -project apps/ios/MemoFlowIOS.xcodeproj -scheme MemoFlowIOS -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -derivedDataPath "$(mktemp -d /tmp/memoflow-derived.XXXXXX)" build` -> failed in Swift compilation; destination resolution no longer blocked
+  - control build in `/tmp` from a fresh unpatched XcodeGen iOS project -> also confirmed the shell session must use a writable `-derivedDataPath`
+  - `npm run build` -> pending rerun after native-project regeneration
+  - `npm run check` -> pending rerun after native-project regeneration
+  - `npm run eval:smoke` -> pending rerun after native-project regeneration
+- Decisions made:
+  - stop forcing the generated project back to Xcode 15-era object format now that local Xcode is `26.6`
+  - treat `-derivedDataPath` as required for native CLI checks in this session because default `~/Library/Developer/Xcode/DerivedData` is not writable here
+  - keep the native scaffold source unchanged because the remaining failure is still in SwiftData macro/plugin loading rather than project generation
+- Risks or follow-ups:
+  - native CLI builds still fail on SwiftData macro/plugin loading with `swift-plugin-server` malformed-response errors
+  - `xcodebuild` still logs CoreSimulator connection warnings in this shell session, although generic destination discovery now succeeds
+  - existing local web app behavior remains unchanged; only native project-generation metadata changed
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: reduce Xcode project-inspector crash risk when selecting the generated iOS project in Xcode 15.4
+- Summary of changes:
+  - simplified the `xcodegen` spec by removing explicit empty signing metadata and version hints that were not needed for the scaffold
+  - regenerated the checked-in iOS project from the simplified spec
+  - kept the existing object-version compatibility patch in the generator so local Xcode 15.4 can still parse the generated project
+- Files changed:
+  - `apps/ios/project.yml`
+  - `apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj`
+  - `scripts/generate_ios_project.sh`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `sed -n '1,220p' apps/ios/project.yml` -> reviewed current `xcodegen` options and target settings
+  - `sed -n '1,220p' scripts/generate_ios_project.sh` -> reviewed current project-format patching
+  - `./scripts/generate_ios_project.sh` -> passed; regenerated and patched `apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj`
+  - `sed -n '130,190p' apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj` -> confirmed `TargetAttributes` is now empty and project metadata is simpler
+  - `rg -n "DevelopmentTeam|CODE_SIGN_STYLE|DEVELOPMENT_TEAM|preferredProjectObjectVersion|objectVersion =" apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj` -> confirmed only `objectVersion = 56;` remains from the compatibility patch
+  - `xcodebuild -list -project apps/ios/MemoFlowIOS.xcodeproj` -> passed; project, target, configurations, and scheme are discoverable
+- Decisions made:
+  - keep the local object-version downgrade patch because it remains necessary for this Xcode 15.4 environment
+  - remove empty signing metadata from the scaffold because it differed from a clean baseline and was a plausible Xcode inspector trigger
+  - treat GUI crash verification as still pending until the project is reopened in Xcode and the blue project icon is clicked again
+- Risks or follow-ups:
+  - the terminal can confirm project parsing, but it cannot prove that the Xcode GUI inspector crash is fully resolved
+  - native CLI builds still have a separate SwiftData macro/plugin loading blocker that is unrelated to this project-inspector change
+  - existing local web app behavior was preserved; only native scaffold metadata changed
+
 ## 2026-07-08
 
 - Branch: `pwa/ios-installable-v0`
@@ -992,3 +1164,118 @@
   - treated `webServerCaptureHtml.ts` as cleaner than `src/webServer.ts` and usually safe to stage whole with the accepted i18n + capture UI commit
 - Risks or follow-ups:
   - `src/webServer.ts` still requires actual partial staging in git because the file remains physically mixed even though the conceptual split is now documented
+
+## 2026-07-11
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: add the native iPhone migration baseline in-repo without changing current web app behavior
+- Summary of changes:
+  - added native migration specs for the domain model, parity checklist, and AI contract under `specs/`
+  - added a new `apps/ios` SwiftUI + SwiftData scaffold with capture, pending, items, and memory surfaces plus a development-only direct AI client boundary
+  - generated an iOS Xcode project via XcodeGen and added a local generator script that patches the project format so local Xcode 15.4 can open it
+  - ignored new local native build artifacts and the existing local-only `Users/` directory
+- Files changed:
+  - `.gitignore`
+  - `apps/ios/README.md`
+  - `apps/ios/project.yml`
+  - `apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj`
+  - `apps/ios/MemoFlowIOS.xcodeproj/project.xcworkspace/contents.xcworkspacedata`
+  - `apps/ios/MemoFlowIOS/App/AppState.swift`
+  - `apps/ios/MemoFlowIOS/App/MemoFlowIOSApp.swift`
+  - `apps/ios/MemoFlowIOS/Info.plist`
+  - `apps/ios/MemoFlowIOS/Models/MemoFlowModels.swift`
+  - `apps/ios/MemoFlowIOS/Models/SuggestionDraft.swift`
+  - `apps/ios/MemoFlowIOS/Services/MemoFlowAIClient.swift`
+  - `apps/ios/MemoFlowIOS/Services/MemoFlowDomain.swift`
+  - `apps/ios/MemoFlowIOS/Services/MemoFlowPromptBuilder.swift`
+  - `apps/ios/MemoFlowIOS/Views/CaptureView.swift`
+  - `apps/ios/MemoFlowIOS/Views/ItemsView.swift`
+  - `apps/ios/MemoFlowIOS/Views/MemoryView.swift`
+  - `apps/ios/MemoFlowIOS/Views/PendingView.swift`
+  - `apps/ios/MemoFlowIOS/Views/RootView.swift`
+  - `scripts/generate_ios_project.sh`
+  - `specs/ai-contract.md`
+  - `specs/native-domain-model.md`
+  - `specs/native-parity-checklist.md`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `xcodegen --version` -> passed, `2.45.4`
+  - `npm run build` -> passed
+  - `npm run check` -> passed
+  - `npm run eval:smoke` -> passed, `5/5`
+  - `xcodegen generate --spec apps/ios/project.yml` -> generated an iOS project, but default output used project object format `77` which local Xcode `15.4` could not open
+  - `./scripts/generate_ios_project.sh` -> passed, regenerates the project and patches object format `77` down to `56` for local Xcode `15.4`
+  - `xcodebuild -project apps/ios/MemoFlowIOS.xcodeproj -scheme MemoFlowIOS -destination 'generic/platform=iOS' build` -> initially failed because the generated project format was too new, then failed on signing without a development team
+  - `xcodebuild -project apps/ios/MemoFlowIOS.xcodeproj -scheme MemoFlowIOS -destination 'generic/platform=iOS' -derivedDataPath .xcode-derived-data CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build` -> reached real native compile setup, then failed in-sandbox on SwiftData macro/plugin loading and finally outside sandbox reported local environment blocker: `iOS 17.5 is not installed`
+- Decisions made:
+  - kept the native app in the current repository under `apps/ios` instead of splitting into a new repo
+  - used SwiftUI + SwiftData for the native baseline and shaped the records with later CloudKit compatibility in mind
+  - kept Stage 1 AI as development-only direct provider access rather than introducing a production proxy now
+  - treated the current web app as the behavior reference and left web runtime behavior unchanged
+  - added a generator script instead of hand-maintaining `.xcodeproj` edits because local XcodeGen currently emits a newer project format than local Xcode can open
+- Risks or follow-ups:
+  - full native build verification on this machine still needs the matching iOS platform files installed in Xcode, as indicated by `iOS 17.5 is not installed`
+  - `SwiftData` macro compilation required unsandboxed verification in this environment
+  - the native scaffold preserves the core loop baseline, but it is still an early migration target rather than complete native parity with every current web feature
+
+## 2026-07-11
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: add a concrete native local-run runbook for the new iOS scaffold
+- Summary of changes:
+  - added a dedicated native runbook with exact Xcode setup, scheme env vars, first-run verification steps, and the narrow next step after first successful launch
+  - kept the task documentation-only and did not change app behavior
+- Files changed:
+  - `docs/product/native-runbook.md`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `npm run build` -> passed
+  - `npm run check` -> passed
+  - `npm run eval:smoke` -> passed, `5/5`
+- Decisions made:
+  - used a standalone runbook instead of folding the steps into `apps/ios/README.md` so the setup and verification workflow is easy to hand off
+  - focused the verification checklist on the core native loop rather than broader roadmap work
+- Risks or follow-ups:
+  - the runbook still depends on local Xcode platform installation and development-team setup outside the repo
+
+## 2026-07-11
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: clean up the first native compile errors after installing the iOS platform locally
+- Summary of changes:
+  - fixed the `MemoFlowDomain.swift` syntax issue in correction snapshot construction
+  - fixed native string-normalization helpers so optional string fields use the intended trimming helper shape
+  - confirmed the remaining native CLI build failure is now SwiftData macro/plugin loading rather than the earlier local code typo
+- Files changed:
+  - `apps/ios/MemoFlowIOS/Services/MemoFlowDomain.swift`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `xcodebuild -project apps/ios/MemoFlowIOS.xcodeproj -scheme MemoFlowIOS -destination 'generic/platform=iOS' -derivedDataPath .xcode-derived-data CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build` -> still failed, but now the dominant errors are SwiftData macro/plugin loading (`compiler plugin not loaded`, `SwiftDataMacros.PersistentModelMacro could not be found`)
+  - `npm run build` -> passed
+  - `npm run check` -> passed
+  - `npm run eval:smoke` -> passed, `5/5`
+- Decisions made:
+  - fixed the ordinary Swift code issues first before treating the remaining native build failure as a toolchain/runtime problem
+  - treated the remaining CLI native failure as Xcode/SwiftData macro loading behavior rather than evidence that the web app or TypeScript runtime regressed
+- Risks or follow-ups:
+  - native CLI build verification still appears blocked by SwiftData macro/plugin loading through `xcodebuild`
+  - the next useful verification step is likely to open and run the project in Xcode directly rather than continuing to force CLI-only native verification
+
+## 2026-07-11
+
+- Branch: `pwa/ios-installable-v0`
+- Goal: reduce the chance of Xcode 15.4 crashing when opening the generated iOS project inspector
+- Summary of changes:
+  - removed `preferredProjectObjectVersion` from the generated `.pbxproj`
+  - updated the iOS project generator script so future regenerations keep the simpler Xcode 15-era project shape
+- Files changed:
+  - `apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj`
+  - `scripts/generate_ios_project.sh`
+  - `docs/change-log.md`
+- Commands run and results:
+  - `./scripts/generate_ios_project.sh` -> passed, regenerated and patched the iOS project
+  - `rg -n "preferredProjectObjectVersion|objectVersion =" apps/ios/MemoFlowIOS.xcodeproj/project.pbxproj` -> confirmed `objectVersion = 56` and no `preferredProjectObjectVersion` entry remains
+- Decisions made:
+  - simplified the generated project format further because the Xcode crash stack pointed at project-format inspector code rather than app source
+- Risks or follow-ups:
+  - this is still an evidence-based workaround, not a guaranteed Xcode GUI fix, so the next confirmation must come from reopening the project in Xcode

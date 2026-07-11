@@ -16,6 +16,7 @@
     "eval:memory": "npm run build --silent && node dist/eval/runMemoryEval.js",
     "eval:context": "npm run build --silent && node dist/eval/runContextEval.js",
     "eval:capture": "npm run build --silent && node dist/eval/runCaptureEval.js",
+    "eval:native-guards": "npm run build --silent && node dist/eval/runNativeGuardEval.js",
     "check": "tsc --noEmit",
     "screenshots:mobile": "node scripts/mobile-screenshots.mjs",
     "demo:seed": "node scripts/demo-seed.mjs",
