@@ -179,6 +179,26 @@ The webapp supports:
 - status update
 - archive
 
+## Mobile Screenshot Loop
+
+Generate mobile screenshots for the main web UI at `375x812`, `390x844`, and `430x932`:
+
+```bash
+npm run screenshots:mobile
+```
+
+Artifacts are written to:
+
+```text
+screenshots/mobile/
+```
+
+Notes:
+
+- the script uses an isolated local dataset under `data/mobile-screenshots/`
+- it captures `Capture`, `Items`, `Memory`, `Pending`, and `Pending Review`
+- if Playwright cannot launch the browser in the current sandbox, rerun the command with the broader machine permission flow enabled
+
 ## CLI
 
 Generate provisional suggestions:
@@ -286,6 +306,16 @@ Freeform memory entries live in:
 ```text
 data/memory.jsonl
 ```
+
+Passive review-correction events live in:
+
+```text
+data/correction_events.jsonl
+```
+
+Correction events record meaningful edits between a reviewed proposal and the
+final saved item. They are local-only parser-quality signals for future manual
+review. MemoFlow does not automatically learn from them yet.
 
 This repo includes one starter sample item. Real user data should remain local. `.env`, `dist/`, `node_modules/`, and `data/items.local.backup.jsonl` are ignored.
 
